@@ -1,0 +1,10 @@
+node_modules/
+logs/
+*.log
+data/portfolio.db
+.env
+*.sqlite
+*.DS_Store
+*.tmp
+.env.development 
+.env.production
