@@ -125,21 +125,14 @@ router.post('/login', [
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const db = getDatabase();
-    const user = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT id, email, name, role, created_at FROM users WHERE id = ?',
-        [req.user.userId],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
-
+    const result = await db.query(
+      'SELECT id, email, name, role, created_at FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+    const user = result.rows[0];
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-
     res.json(user);
   } catch (error) {
     console.error('Get user error:', error);
