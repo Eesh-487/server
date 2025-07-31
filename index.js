@@ -130,28 +130,10 @@ app.use((err, req, res, next) => {
 });
 
 // Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  // Serve static files from the React build folder if it exists
-  const distPath = path.join(__dirname, '../dist');
-  const indexPath = path.join(distPath, 'index.html');
-  if (fs.existsSync(distPath) && fs.existsSync(indexPath)) {
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(indexPath);
-    });
-    console.log('Static file serving configured for production');
-  } else {
-    app.use('*', (req, res) => {
-      res.status(404).json({ error: 'Frontend not deployed. dist/index.html not found.' });
-    });
-    console.log('No frontend build found. Static file serving disabled.');
-  }
-} else {
-  // 404 handler for development
-  app.use('*', (req, res) => {
-    res.status(404).json({ error: 'Route not found' });
-  });
-}
+// Always return 404 for non-API routes (API-only backend)
+app.use('*', (req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
 
 const PORT = process.env.PORT || 3001;
 
