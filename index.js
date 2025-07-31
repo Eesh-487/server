@@ -49,6 +49,7 @@ const io = new Server(server, {
 app.use(helmet());
 app.use(cors({
   origin: [
+    'https://stocks-frontend-wheat.vercel.app', // Vercel frontend
     'http://localhost:5173',
     'http://192.168.1.9:5173'
   ],
