@@ -125,12 +125,13 @@ router.post('/holdings', authenticateToken, [
         currentPrice = marketData.price;
         purchasePrice = currentPrice; // Always use current market price
       } else {
+        console.error(`[Add Asset] Could not fetch current market price for ${symbol}. marketData:`, marketData);
         return res.status(400).json({ 
           error: 'Could not fetch current market price. Please try again later.' 
         });
       }
     } catch (error) {
-      console.warn(`Could not fetch market data for ${symbol}:`, error.message);
+      console.error(`[Add Asset] Error fetching market data for ${symbol}:`, error);
       return res.status(400).json({ 
         error: 'Could not fetch current market price. Please try again later.' 
       });
