@@ -5,19 +5,14 @@ async function calculateRiskMetrics(userId, confidenceLevel = 95, timeHorizon = 
   const db = getDatabase();
   
   // Get portfolio holdings
-  const holdings = await new Promise((resolve, reject) => {
-    db.all(
-      `SELECT h.*, m.price as current_price, m.change_percent
+  const holdingsResult = await db.query(
+    `SELECT h.*, m.price as current_price, m.change_percent
        FROM portfolio_holdings h 
        LEFT JOIN market_data m ON h.symbol = m.symbol 
-       WHERE h.user_id = ?`,
-      [userId],
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
-    );
-  });
+       WHERE h.user_id = $1`,
+    [userId]
+  );
+  const holdings = holdingsResult.rows;
 
   if (holdings.length === 0) {
     return {

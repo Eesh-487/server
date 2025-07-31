@@ -34,12 +34,8 @@ async function runDailyAnalytics(io) {
     const db = getDatabase();
     
     // Get all users
-    const users = await new Promise((resolve, reject) => {
-      db.all('SELECT id FROM users', (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      });
-    });
+    const result = await db.query('SELECT id FROM users');
+    const users = result.rows;
 
     for (const user of users) {
       try {
@@ -70,18 +66,13 @@ async function runHourlyUpdates(io) {
     const db = getDatabase();
     
     // Get active users (users who logged in within last 24 hours)
-    const activeUsers = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT DISTINCT user_id 
+    const result = await db.query(
+      `SELECT DISTINCT user_id 
          FROM analytics_events 
          WHERE event_type = 'user_login' 
-         AND timestamp >= datetime('now', '-1 day')`,
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+         AND timestamp >= NOW() - INTERVAL '1 day'`
+    );
+    const activeUsers = result.rows;
 
     for (const user of activeUsers) {
       try {
@@ -122,19 +113,14 @@ async function generateDailyInsights(userId) {
 
   try {
     // Get portfolio holdings
-    const holdings = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT h.*, m.price as current_price, m.change_percent
+    const result = await db.query(
+      `SELECT h.*, m.price as current_price, m.change_percent
          FROM portfolio_holdings h 
          LEFT JOIN market_data m ON h.symbol = m.symbol 
-         WHERE h.user_id = ?`,
-        [userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+         WHERE h.user_id = $1`,
+      [userId]
+    );
+    const holdings = result.rows;
 
     if (holdings.length === 0) return insights;
 
@@ -213,16 +199,10 @@ async function processInsightsForNotifications(userId, insights, io) {
   for (const insight of highPriorityInsights) {
     const notificationId = require('uuid').v4();
     
-    await new Promise((resolve, reject) => {
-      db.run(
-        'INSERT INTO notifications (id, user_id, type, title, message) VALUES (?, ?, ?, ?, ?)',
-        [notificationId, userId, insight.type, insight.title, insight.message],
-        (err) => {
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+    await db.query(
+      'INSERT INTO notifications (id, user_id, type, title, message) VALUES ($1, $2, $3, $4, $5)',
+      [notificationId, userId, insight.type, insight.title, insight.message]
+    );
 
     // Emit real-time notification
     io.to(`user_${userId}`).emit('notification', {
@@ -240,55 +220,36 @@ async function generateSystemMetrics() {
   
   try {
     // Get total users
-    const totalUsers = await new Promise((resolve, reject) => {
-      db.get('SELECT COUNT(*) as count FROM users', (err, row) => {
-        if (err) reject(err);
-        else resolve(row?.count || 0);
-      });
-    });
+    const totalUsersResult = await db.query('SELECT COUNT(*) as count FROM users');
+    const totalUsers = totalUsersResult.rows[0]?.count || 0;
 
     // Get active users today
-    const activeUsersToday = await new Promise((resolve, reject) => {
-      db.get(
-        `SELECT COUNT(DISTINCT user_id) as count 
+    const activeUsersTodayResult = await db.query(
+      `SELECT COUNT(DISTINCT user_id) as count 
          FROM analytics_events 
-         WHERE date(timestamp) = date('now')`,
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row?.count || 0);
-        }
-      );
-    });
+         WHERE DATE(timestamp) = CURRENT_DATE`
+    );
+    const activeUsersToday = activeUsersTodayResult.rows[0]?.count || 0;
 
     // Get total portfolio value
-    const totalPortfolioValue = await new Promise((resolve, reject) => {
-      db.get(
-        `SELECT SUM(h.quantity * COALESCE(m.price, h.average_cost)) as total
+    const totalPortfolioValueResult = await db.query(
+      `SELECT SUM(h.quantity * COALESCE(m.price, h.average_cost)) as total
          FROM portfolio_holdings h 
-         LEFT JOIN market_data m ON h.symbol = m.symbol`,
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row?.total || 0);
-        }
-      );
-    });
+         LEFT JOIN market_data m ON h.symbol = m.symbol`
+    );
+    const totalPortfolioValue = totalPortfolioValueResult.rows[0]?.total || 0;
 
     // Get popular features
-    const popularFeatures = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT event_type, COUNT(*) as usage_count
+    const popularFeaturesResult = await db.query(
+      `SELECT event_type, COUNT(*) as usage_count
          FROM analytics_events 
-         WHERE timestamp >= datetime('now', '-7 days')
+         WHERE timestamp >= NOW() - INTERVAL '7 days'
          AND event_type LIKE '%_viewed'
          GROUP BY event_type
          ORDER BY usage_count DESC
-         LIMIT 5`,
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+         LIMIT 5`
+    );
+    const popularFeatures = popularFeaturesResult.rows;
 
     return {
       total_users: totalUsers,
@@ -308,18 +269,13 @@ async function checkForAlerts(io) {
   
   try {
     // Check for unusual market movements
-    const unusualMovements = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT symbol, price, change_percent 
+    const unusualMovementsResult = await db.query(
+      `SELECT symbol, price, change_percent 
          FROM market_data 
          WHERE ABS(change_percent) > 10
-         ORDER BY ABS(change_percent) DESC`,
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+         ORDER BY ABS(change_percent) DESC`
+    );
+    const unusualMovements = unusualMovementsResult.rows;
 
     if (unusualMovements.length > 0) {
       // Emit market alert

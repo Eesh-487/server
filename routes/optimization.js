@@ -34,29 +34,23 @@ router.post('/optimize', authenticateToken, [
     const db = getDatabase();
     const resultId = uuidv4();
     
-    await new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO optimization_results 
+    await db.query(
+      `INSERT INTO optimization_results 
          (id, user_id, method, risk_tolerance, current_allocation, optimized_allocation, 
           expected_return, expected_volatility, sharpe_improvement) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          resultId,
-          req.user.userId,
-          method,
-          risk_tolerance,
-          JSON.stringify(optimizationResult.current_allocation),
-          JSON.stringify(optimizationResult.optimized_allocation),
-          optimizationResult.expected_return,
-          optimizationResult.expected_volatility,
-          optimizationResult.sharpe_improvement
-        ],
-        (err) => {
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        resultId,
+        req.user.userId,
+        method,
+        risk_tolerance,
+        JSON.stringify(optimizationResult.current_allocation),
+        JSON.stringify(optimizationResult.optimized_allocation),
+        optimizationResult.expected_return,
+        optimizationResult.expected_volatility,
+        optimizationResult.sharpe_improvement
+      ]
+    );
 
     await logAnalyticsEvent(req.user.userId, 'optimization_run', { 
       method, 
@@ -96,17 +90,12 @@ router.get('/result/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const db = getDatabase();
 
-    const result = await new Promise((resolve, reject) => {
-      db.get(
-        `SELECT * FROM optimization_results 
-         WHERE id = ? AND user_id = ?`,
-        [id, req.user.userId],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
+    const resultQuery = await db.query(
+      `SELECT * FROM optimization_results 
+         WHERE id = $1 AND user_id = $2`,
+      [id, req.user.userId]
+    );
+    const result = resultQuery.rows[0];
 
     if (!result) {
       return res.status(404).json({ error: 'Optimization result not found' });
@@ -133,17 +122,12 @@ router.post('/apply/:id', authenticateToken, async (req, res) => {
     const db = getDatabase();
 
     // Get optimization result
-    const result = await new Promise((resolve, reject) => {
-      db.get(
-        `SELECT optimized_allocation FROM optimization_results 
-         WHERE id = ? AND user_id = ?`,
-        [id, req.user.userId],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
+    const resultQuery = await db.query(
+      `SELECT optimized_allocation FROM optimization_results 
+         WHERE id = $1 AND user_id = $2`,
+      [id, req.user.userId]
+    );
+    const result = resultQuery.rows[0];
 
     if (!result) {
       return res.status(404).json({ error: 'Optimization result not found' });
@@ -152,19 +136,14 @@ router.post('/apply/:id', authenticateToken, async (req, res) => {
     const optimizedAllocation = JSON.parse(result.optimized_allocation);
 
     // Get current portfolio value
-    const currentHoldings = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT h.*, m.price as current_price 
+    const currentHoldingsQuery = await db.query(
+      `SELECT h.*, m.price as current_price 
          FROM portfolio_holdings h 
          LEFT JOIN market_data m ON h.symbol = m.symbol 
-         WHERE h.user_id = ?`,
-        [req.user.userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+         WHERE h.user_id = $1`,
+      [req.user.userId]
+    );
+    const currentHoldings = currentHoldingsQuery.rows;
 
     const totalValue = currentHoldings.reduce((sum, holding) => {
       const price = holding.current_price || holding.average_cost;
@@ -269,17 +248,12 @@ router.get('/export/:id', authenticateToken, async (req, res) => {
     const { format = 'json' } = req.query;
     const db = getDatabase();
 
-    const result = await new Promise((resolve, reject) => {
-      db.get(
-        `SELECT * FROM optimization_results 
-         WHERE id = ? AND user_id = ?`,
-        [id, req.user.userId],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
+    const resultQuery = await db.query(
+      `SELECT * FROM optimization_results 
+         WHERE id = $1 AND user_id = $2`,
+      [id, req.user.userId]
+    );
+    const result = resultQuery.rows[0];
 
     if (!result) {
       return res.status(404).json({ error: 'Optimization result not found' });

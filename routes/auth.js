@@ -25,12 +25,8 @@ router.post('/register', [
     const db = getDatabase();
 
     // Check if user exists
-    const existingUser = await new Promise((resolve, reject) => {
-      db.get('SELECT id FROM users WHERE email = ?', [email], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const existingUserResult = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+    const existingUser = existingUserResult.rows[0];
 
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
@@ -42,16 +38,10 @@ router.post('/register', [
 
     // Create user
     const userId = uuidv4();
-    await new Promise((resolve, reject) => {
-      db.run(
-        'INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)',
-        [userId, email, passwordHash, name],
-        (err) => {
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+    await db.query(
+      'INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4)',
+      [userId, email, passwordHash, name]
+    );
 
     // Generate JWT
     const token = jwt.sign(
@@ -88,16 +78,11 @@ router.post('/login', [
     const db = getDatabase();
 
     // Find user
-    const user = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT id, email, password_hash, name, role FROM users WHERE email = ?',
-        [email],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
+    const userResult = await db.query(
+      'SELECT id, email, password_hash, name, role FROM users WHERE email = $1',
+      [email]
+    );
+    const user = userResult.rows[0];
 
     if (!user) {
       await logAnalyticsEvent(null, 'login_failed', { email, reason: 'user_not_found' }, req.ip, req.get('User-Agent'));

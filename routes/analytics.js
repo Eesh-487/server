@@ -12,12 +12,7 @@ router.delete('/clear', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
 
     // Delete user analytics data
-    await new Promise((resolve, reject) => {
-      db.run('DELETE FROM analytics_events WHERE user_id = ?', [userId], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    await db.query('DELETE FROM analytics_events WHERE user_id = $1', [userId]);
 
     // Log the clear event itself
     await logAnalyticsEvent(userId, 'analytics_cleared', {}, req.ip, req.get('User-Agent'));
@@ -36,57 +31,42 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     const db = getDatabase();
 
     // Get event counts by type
-    const eventCounts = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT event_type, COUNT(*) as count
+    const eventCountsResult = await db.query(
+      `SELECT event_type, COUNT(*) as count
          FROM analytics_events 
-         WHERE user_id = ? 
-         AND timestamp >= datetime('now', '-' || ? || ' days')
+         WHERE user_id = $1 
+         AND timestamp >= NOW() - INTERVAL '$2 days'
          GROUP BY event_type
          ORDER BY count DESC`,
-        [req.user.userId, days],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId, days]
+    );
+    const eventCounts = eventCountsResult.rows;
 
     // Get daily activity
-    const dailyActivity = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT date(timestamp) as date, COUNT(*) as events
+    const dailyActivityResult = await db.query(
+      `SELECT DATE(timestamp) as date, COUNT(*) as events
          FROM analytics_events 
-         WHERE user_id = ? 
-         AND timestamp >= datetime('now', '-' || ? || ' days')
-         GROUP BY date(timestamp)
-         ORDER BY date ASC`,
-        [req.user.userId, days],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+         WHERE user_id = $1 
+         AND timestamp >= NOW() - INTERVAL '$2 days'
+         GROUP BY DATE(timestamp)
+         ORDER BY DATE ASC`,
+      [req.user.userId, days]
+    );
+    const dailyActivity = dailyActivityResult.rows;
 
     // Get most viewed features
-    const topFeatures = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT event_type, COUNT(*) as views
+    const topFeaturesResult = await db.query(
+      `SELECT event_type, COUNT(*) as views
          FROM analytics_events 
-         WHERE user_id = ? 
+         WHERE user_id = $1 
          AND event_type LIKE '%_viewed'
-         AND timestamp >= datetime('now', '-' || ? || ' days')
+         AND timestamp >= NOW() - INTERVAL '$2 days'
          GROUP BY event_type
          ORDER BY views DESC
          LIMIT 10`,
-        [req.user.userId, days],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId, days]
+    );
+    const topFeatures = topFeaturesResult.rows;
 
     const analytics = {
       period_days: parseInt(days),
@@ -112,21 +92,16 @@ router.get('/insights', authenticateToken, async (req, res) => {
     const db = getDatabase();
 
     // Get portfolio composition insights
-    const holdings = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT h.category, COUNT(*) as count, 
+    const holdingsResult = await db.query(
+      `SELECT h.category, COUNT(*) as count, 
                 SUM(h.quantity * COALESCE(m.price, h.average_cost)) as value
          FROM portfolio_holdings h 
          LEFT JOIN market_data m ON h.symbol = m.symbol 
-         WHERE h.user_id = ? 
+         WHERE h.user_id = $1 
          GROUP BY h.category`,
-        [req.user.userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId]
+    );
+    const holdings = holdingsResult.rows;
 
     const totalValue = holdings.reduce((sum, h) => sum + h.value, 0);
     
@@ -195,61 +170,46 @@ router.get('/behavior', authenticateToken, async (req, res) => {
     const db = getDatabase();
 
     // Get login patterns
-    const loginPattern = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT strftime('%H', timestamp) as hour, COUNT(*) as logins
+    const loginPatternResult = await db.query(
+      `SELECT EXTRACT(HOUR FROM timestamp) as hour, COUNT(*) as logins
          FROM analytics_events 
-         WHERE user_id = ? 
+         WHERE user_id = $1 
          AND event_type = 'user_login'
-         AND timestamp >= datetime('now', '-' || ? || ' days')
-         GROUP BY strftime('%H', timestamp)
+         AND timestamp >= NOW() - INTERVAL '$2 days'
+         GROUP BY EXTRACT(HOUR FROM timestamp)
          ORDER BY hour`,
-        [req.user.userId, days],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId, days]
+    );
+    const loginPattern = loginPatternResult.rows;
 
     // Get feature usage patterns
-    const featureUsage = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT event_type, 
+    const featureUsageResult = await db.query(
+      `SELECT event_type, 
                 COUNT(*) as usage_count,
-                AVG(julianday('now') - julianday(timestamp)) as avg_days_since_last_use
+                AVG(EXTRACT(DAY FROM NOW() - timestamp)) as avg_days_since_last_use
          FROM analytics_events 
-         WHERE user_id = ? 
-         AND timestamp >= datetime('now', '-' || ? || ' days')
+         WHERE user_id = $1 
+         AND timestamp >= NOW() - INTERVAL '$2 days'
          GROUP BY event_type
          ORDER BY usage_count DESC`,
-        [req.user.userId, days],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId, days]
+    );
+    const featureUsage = featureUsageResult.rows;
 
     // Get session patterns
-    const sessionPattern = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT date(timestamp) as date,
-                COUNT(DISTINCT strftime('%H', timestamp)) as active_hours,
+    const sessionPatternResult = await db.query(
+      `SELECT DATE(timestamp) as date,
+                COUNT(DISTINCT EXTRACT(HOUR FROM timestamp)) as active_hours,
                 COUNT(*) as total_events
          FROM analytics_events 
-         WHERE user_id = ? 
-         AND timestamp >= datetime('now', '-' || ? || ' days')
-         GROUP BY date(timestamp)
-         ORDER BY date DESC
+         WHERE user_id = $1 
+         AND timestamp >= NOW() - INTERVAL '$2 days'
+         GROUP BY DATE(timestamp)
+         ORDER BY DATE DESC
          LIMIT 30`,
-        [req.user.userId, days],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId, days]
+    );
+    const sessionPattern = sessionPatternResult.rows;
 
     const behaviorAnalysis = {
       login_pattern: loginPattern,

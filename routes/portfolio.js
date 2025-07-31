@@ -16,28 +16,9 @@ router.delete('/clear', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
 
     // Delete all holdings for the user
-    await new Promise((resolve, reject) => {
-      db.run('DELETE FROM portfolio_holdings WHERE user_id = ?', [userId], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    // Delete any watchlists
-    await new Promise((resolve, reject) => {
-      db.run('DELETE FROM watchlists WHERE user_id = ?', [userId], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    // Delete any portfolio history
-    await new Promise((resolve, reject) => {
-      db.run('DELETE FROM portfolio_history WHERE user_id = ?', [userId], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    await db.query('DELETE FROM portfolio_holdings WHERE user_id = $1', [userId]);
+    await db.query('DELETE FROM watchlists WHERE user_id = $1', [userId]);
+    await db.query('DELETE FROM portfolio_history WHERE user_id = $1', [userId]);
 
     // Log analytics event
     await logAnalyticsEvent(userId, 'portfolio_cleared', {}, req.ip, req.get('User-Agent'));
@@ -59,16 +40,8 @@ router.get('/holdings', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     console.log('Fetching holdings for user:', userId);
 
-    const holdings = await new Promise((resolve, reject) => {
-      db.all('SELECT * FROM portfolio_holdings WHERE user_id = ?', [userId], (err, rows) => {
-        if (err) {
-          logError(`DB error in /holdings for user ${userId}: ${err.stack || err}`);
-          reject(err);
-        } else {
-          resolve(rows || []);
-        }
-      });
-    });
+    const holdingsResult = await db.query('SELECT * FROM portfolio_holdings WHERE user_id = $1', [userId]);
+    const holdings = holdingsResult.rows;
 
     console.log('Holdings:', holdings);
 
@@ -164,16 +137,11 @@ router.post('/holdings', authenticateToken, [
     }
 
     // Check if holding already exists (get ALL matching holdings in case of duplicates)
-    const existingHoldings = await new Promise((resolve, reject) => {
-      db.all(
-        'SELECT id, quantity, average_cost FROM portfolio_holdings WHERE user_id = ? AND symbol = ?',
-        [req.user.userId, symbol.toUpperCase()],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+    const existingHoldingsResult = await db.query(
+      'SELECT id, quantity, average_cost FROM portfolio_holdings WHERE user_id = $1 AND symbol = $2',
+      [req.user.userId, symbol.toUpperCase()]
+    );
+    const existingHoldings = existingHoldingsResult.rows;
 
     // If multiple holdings with this symbol exist, merge them first
     let existingHolding = null;
@@ -186,29 +154,17 @@ router.post('/holdings', authenticateToken, [
       const newAverageCost = totalCost / totalQuantity;
       
       // Update the first holding with merged values
-      await new Promise((resolve, reject) => {
-        db.run(
-          'UPDATE portfolio_holdings SET quantity = ?, average_cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [totalQuantity, newAverageCost, existingHoldings[0].id],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
+      await db.query(
+        'UPDATE portfolio_holdings SET quantity = $1, average_cost = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+        [totalQuantity, newAverageCost, existingHoldings[0].id]
+      );
 
       // Delete the duplicate holdings (keep the first one)
       for (let i = 1; i < existingHoldings.length; i++) {
-        await new Promise((resolve, reject) => {
-          db.run(
-            'DELETE FROM portfolio_holdings WHERE id = ?',
-            [existingHoldings[i].id],
-            (err) => {
-              if (err) reject(err);
-              else resolve();
-            }
-          );
-        });
+        await db.query(
+          'DELETE FROM portfolio_holdings WHERE id = $1',
+          [existingHoldings[i].id]
+        );
       }
       
       existingHolding = {
@@ -226,31 +182,19 @@ router.post('/holdings', authenticateToken, [
       const newAverageCost = ((existingHolding.quantity * existingHolding.average_cost) + 
                              (quantity * purchasePrice)) / totalQuantity;
 
-      await new Promise((resolve, reject) => {
-        db.run(
-          'UPDATE portfolio_holdings SET quantity = ?, average_cost = ?, current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [totalQuantity, newAverageCost, currentPrice, existingHolding.id],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
+      await db.query(
+        'UPDATE portfolio_holdings SET quantity = $1, average_cost = $2, current_price = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4',
+        [totalQuantity, newAverageCost, currentPrice, existingHolding.id]
+      );
 
       await logAnalyticsEvent(req.user.userId, 'holding_updated', { symbol, quantity, purchase_price: purchasePrice });
     } else {
       // Create new holding
       const holdingId = uuidv4();
-      await new Promise((resolve, reject) => {
-        db.run(
-          'INSERT INTO portfolio_holdings (id, user_id, symbol, name, category, quantity, average_cost, purchase_price, current_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [holdingId, req.user.userId, symbol.toUpperCase(), name, category, quantity, purchasePrice, purchasePrice, currentPrice],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
+      await db.query(
+        'INSERT INTO portfolio_holdings (id, user_id, symbol, name, category, quantity, average_cost, purchase_price, current_price) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+        [holdingId, req.user.userId, symbol.toUpperCase(), name, category, quantity, purchasePrice, purchasePrice, currentPrice]
+      );
 
       await logAnalyticsEvent(req.user.userId, 'holding_added', { symbol, quantity, purchase_price: purchasePrice });
     }
@@ -286,16 +230,11 @@ router.put('/holdings/:id', authenticateToken, [
     const db = getDatabase();
 
     // Verify ownership
-    const holding = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT id FROM portfolio_holdings WHERE id = ? AND user_id = ?',
-        [id, req.user.userId],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
+    const holdingResult = await db.query(
+      'SELECT id FROM portfolio_holdings WHERE id = $1 AND user_id = $2',
+      [id, req.user.userId]
+    );
+    const holding = holdingResult.rows[0];
 
     if (!holding) {
       return res.status(404).json({ error: 'Holding not found' });
@@ -304,34 +243,26 @@ router.put('/holdings/:id', authenticateToken, [
     // Build update query
     const updateFields = [];
     const updateValues = [];
-    
+    let paramIndex = 1;
     if (updates.quantity !== undefined) {
-      updateFields.push('quantity = ?');
+      updateFields.push(`quantity = $${paramIndex}`);
       updateValues.push(updates.quantity);
+      paramIndex++;
     }
-    
     if (updates.average_cost !== undefined) {
-      updateFields.push('average_cost = ?');
+      updateFields.push(`average_cost = $${paramIndex}`);
       updateValues.push(updates.average_cost);
+      paramIndex++;
     }
-
     if (updateFields.length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
-
     updateFields.push('updated_at = CURRENT_TIMESTAMP');
     updateValues.push(id);
-
-    await new Promise((resolve, reject) => {
-      db.run(
-        `UPDATE portfolio_holdings SET ${updateFields.join(', ')} WHERE id = ?`,
-        updateValues,
-        (err) => {
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+    await db.query(
+      `UPDATE portfolio_holdings SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
+      updateValues
+    );
 
     await logAnalyticsEvent(req.user.userId, 'holding_updated', { holding_id: id, updates });
 
@@ -353,31 +284,17 @@ router.delete('/holdings/:id', authenticateToken, async (req, res) => {
     const db = getDatabase();
 
     // Verify ownership and get holding info
-    const holding = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT id, symbol FROM portfolio_holdings WHERE id = ? AND user_id = ?',
-        [id, req.user.userId],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
+    const holdingResult = await db.query(
+      'SELECT id, symbol FROM portfolio_holdings WHERE id = $1 AND user_id = $2',
+      [id, req.user.userId]
+    );
+    const holding = holdingResult.rows[0];
 
     if (!holding) {
       return res.status(404).json({ error: 'Holding not found' });
     }
 
-    await new Promise((resolve, reject) => {
-      db.run(
-        'DELETE FROM portfolio_holdings WHERE id = ?',
-        [id],
-        (err) => {
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+    await db.query('DELETE FROM portfolio_holdings WHERE id = $1', [id]);
 
     await logAnalyticsEvent(req.user.userId, 'holding_deleted', { holding_id: id, symbol: holding.symbol });
 
@@ -404,24 +321,19 @@ router.get('/summary', authenticateToken, async (req, res) => {
 router.get('/allocation', authenticateToken, async (req, res) => {
   try {
     const db = getDatabase();
-    const allocation = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT 
+    const allocationResult = await db.query(
+      `SELECT 
            h.category,
            SUM(h.quantity * COALESCE(m.price, h.average_cost)) as value,
            COUNT(*) as holdings_count
          FROM portfolio_holdings h 
          LEFT JOIN market_data m ON h.symbol = m.symbol 
-         WHERE h.user_id = ? 
+         WHERE h.user_id = $1 
          GROUP BY h.category
          ORDER BY value DESC`,
-        [req.user.userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId]
+    );
+    const allocation = allocationResult.rows;
 
     const totalValue = allocation.reduce((sum, cat) => sum + cat.value, 0);
     
@@ -447,35 +359,25 @@ router.post('/refresh', authenticateToken, async (req, res) => {
     const db = getDatabase();
     
     // First, check for and clean up any duplicate holdings in the database
-    const duplicates = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT symbol, COUNT(*) as count 
+    const duplicatesResult = await db.query(
+      `SELECT symbol, COUNT(*) as count 
          FROM portfolio_holdings 
-         WHERE user_id = ? 
+         WHERE user_id = $1 
          GROUP BY symbol 
          HAVING COUNT(*) > 1`,
-        [req.user.userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId]
+    );
+    const duplicates = duplicatesResult.rows;
     
     let cleanedCount = 0;
     
     // Merge duplicates in the database
     for (const duplicate of duplicates) {
-      const allHoldings = await new Promise((resolve, reject) => {
-        db.all(
-          'SELECT * FROM portfolio_holdings WHERE user_id = ? AND symbol = ? ORDER BY created_at ASC',
-          [req.user.userId, duplicate.symbol],
-          (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows || []);
-          }
-        );
-      });
+      const allHoldingsResult = await db.query(
+        'SELECT * FROM portfolio_holdings WHERE user_id = $1 AND symbol = $2 ORDER BY created_at ASC',
+        [req.user.userId, duplicate.symbol]
+      );
+      const allHoldings = allHoldingsResult.rows;
 
       if (allHoldings.length > 1) {
         // Calculate merged values
@@ -485,29 +387,17 @@ router.post('/refresh', authenticateToken, async (req, res) => {
         const firstHolding = allHoldings[0];
 
         // Update the first holding with merged values
-        await new Promise((resolve, reject) => {
-          db.run(
-            'UPDATE portfolio_holdings SET quantity = ?, average_cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [totalQuantity, newAverageCost, firstHolding.id],
-            (err) => {
-              if (err) reject(err);
-              else resolve();
-            }
-          );
-        });
+        await db.query(
+          'UPDATE portfolio_holdings SET quantity = $1, average_cost = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+          [totalQuantity, newAverageCost, firstHolding.id]
+        );
 
         // Delete the duplicate holdings (keep the first one)
         for (let i = 1; i < allHoldings.length; i++) {
-          await new Promise((resolve, reject) => {
-            db.run(
-              'DELETE FROM portfolio_holdings WHERE id = ?',
-              [allHoldings[i].id],
-              (err) => {
-                if (err) reject(err);
-                else resolve();
-              }
-            );
-          });
+          await db.query(
+            'DELETE FROM portfolio_holdings WHERE id = $1',
+            [allHoldings[i].id]
+          );
         }
 
         cleanedCount++;
@@ -515,16 +405,11 @@ router.post('/refresh', authenticateToken, async (req, res) => {
     }
     
     // Now get all symbols in the user's portfolio (after cleanup)
-    const symbols = await new Promise((resolve, reject) => {
-      db.all(
-        'SELECT DISTINCT symbol FROM portfolio_holdings WHERE user_id = ?',
-        [req.user.userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows.map(row => row.symbol));
-        }
-      );
-    });
+    const symbolsResult = await db.query(
+      'SELECT DISTINCT symbol FROM portfolio_holdings WHERE user_id = $1',
+      [req.user.userId]
+    );
+    const symbols = symbolsResult.rows.map(row => row.symbol);
 
     if (symbols.length === 0) {
       return res.json({ 
@@ -542,19 +427,10 @@ router.post('/refresh', authenticateToken, async (req, res) => {
         const marketData = await getMarketData(symbol);
         if (marketData && marketData.price > 0) {
           // Update current_price in holdings
-          await new Promise((resolve, reject) => {
-            db.run(
-              'UPDATE portfolio_holdings SET current_price = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND symbol = ?',
-              [marketData.price, req.user.userId, symbol],
-              (err) => {
-                if (err) reject(err);
-                else {
-                  updatedCount++;
-                  resolve();
-                }
-              }
-            );
-          });
+          await db.query(
+            'UPDATE portfolio_holdings SET current_price = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND symbol = $3',
+            [marketData.price, req.user.userId, symbol]
+          );
         }
       } catch (error) {
         console.warn(`Could not update price for ${symbol}:`, error.message);

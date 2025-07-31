@@ -51,21 +51,16 @@ async function updateMarketData(io) {
     const db = getDatabase();
     
     // Get all symbols that need updating (from portfolio holdings and watchlists)
-    const symbols = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT DISTINCT symbol FROM (
-          SELECT symbol FROM portfolio_holdings
-          UNION
-          SELECT symbol FROM watchlist
-          UNION
-          SELECT symbol FROM market_data WHERE timestamp > datetime('now', '-1 hour')
-        )`,
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows.map(row => row.symbol));
-        }
-      );
-    });
+    const result = await db.query(
+      `SELECT DISTINCT symbol FROM (
+        SELECT symbol FROM portfolio_holdings
+        UNION
+        SELECT symbol FROM watchlist
+        UNION
+        SELECT symbol FROM market_data WHERE timestamp > NOW() - INTERVAL '1 hour'
+      )`
+    );
+    const symbols = result.rows.map(row => row.symbol);
 
     if (symbols.length === 0) return;
 
@@ -102,16 +97,11 @@ async function getMarketData(symbol) {
     const db = getDatabase();
     
     // First try to get from database
-    const cachedData = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT * FROM market_data WHERE symbol = ? AND timestamp > datetime("now", "-5 minutes")',
-        [symbol.toUpperCase()],
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        }
-      );
-    });
+    const result = await db.query(
+      "SELECT * FROM market_data WHERE symbol = $1 AND timestamp > NOW() - INTERVAL '5 minutes'",
+      [symbol.toUpperCase()]
+    );
+    const cachedData = result.rows[0];
 
     if (cachedData) {
       return {

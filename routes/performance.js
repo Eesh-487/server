@@ -28,20 +28,15 @@ router.get('/history', authenticateToken, async (req, res) => {
     const { days = 180 } = req.query;
     const db = getDatabase();
 
-    const performanceHistory = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT date, total_value, daily_return, cumulative_return, benchmark_return
+    const performanceHistoryResult = await db.query(
+      `SELECT date, total_value, daily_return, cumulative_return, benchmark_return
          FROM portfolio_performance 
-         WHERE user_id = ? 
-         AND date >= date('now', '-' || ? || ' days')
+         WHERE user_id = $1 
+         AND date >= NOW() - INTERVAL '$2 days'
          ORDER BY date ASC`,
-        [req.user.userId, days],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId, days]
+    );
+    const performanceHistory = performanceHistoryResult.rows;
 
     // If no historical data, generate sample data
     if (performanceHistory.length === 0) {
@@ -65,24 +60,19 @@ router.get('/monthly-returns', authenticateToken, async (req, res) => {
     const { months = 24 } = req.query;
     const db = getDatabase();
 
-    const monthlyReturns = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT 
-           strftime('%Y-%m', date) as period,
+    const monthlyReturnsResult = await db.query(
+      `SELECT 
+           TO_CHAR(date, 'YYYY-MM') as period,
            AVG(daily_return) * 30 as portfolio_return,
            AVG(benchmark_return) * 30 as benchmark_return
          FROM portfolio_performance 
-         WHERE user_id = ? 
-         AND date >= date('now', '-' || ? || ' months')
-         GROUP BY strftime('%Y-%m', date)
+         WHERE user_id = $1 
+         AND date >= NOW() - INTERVAL '$2 months'
+         GROUP BY TO_CHAR(date, 'YYYY-MM')
          ORDER BY period DESC`,
-        [req.user.userId, months],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+      [req.user.userId, months]
+    );
+    const monthlyReturns = monthlyReturnsResult.rows;
 
     // If no data, generate sample monthly returns
     if (monthlyReturns.length === 0) {

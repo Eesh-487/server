@@ -5,19 +5,14 @@ async function calculatePortfolioMetrics(userId) {
   const db = getDatabase();
   
   // Get portfolio holdings with current market data
-  const holdings = await new Promise((resolve, reject) => {
-    db.all(
-      `SELECT h.*, m.price as current_price, m.change_percent
+  const holdingsResult = await db.query(
+    `SELECT h.*, m.price as current_price, m.change_percent
        FROM portfolio_holdings h 
        LEFT JOIN market_data m ON h.symbol = m.symbol 
-       WHERE h.user_id = ?`,
-      [userId],
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
-    );
-  });
+       WHERE h.user_id = $1`,
+    [userId]
+  );
+  const holdings = holdingsResult.rows;
 
   if (holdings.length === 0) {
     return {
@@ -68,24 +63,19 @@ async function calculatePortfolioMetrics(userId) {
 async function calculateAllocation(userId) {
   const db = getDatabase();
   
-  const allocation = await new Promise((resolve, reject) => {
-    db.all(
-      `SELECT 
+  const allocationResult = await db.query(
+    `SELECT 
          h.category,
          SUM(h.quantity * COALESCE(m.price, h.average_cost)) as value,
          COUNT(*) as holdings_count
        FROM portfolio_holdings h 
        LEFT JOIN market_data m ON h.symbol = m.symbol 
-       WHERE h.user_id = ? 
+       WHERE h.user_id = $1 
        GROUP BY h.category
        ORDER BY value DESC`,
-      [userId],
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
-    );
-  });
+    [userId]
+  );
+  const allocation = allocationResult.rows;
 
   const totalValue = allocation.reduce((sum, cat) => sum + cat.value, 0);
   
@@ -103,18 +93,13 @@ async function updatePortfolioPerformance(userId) {
   const db = getDatabase();
   
   // Get yesterday's performance for comparison
-  const yesterday = await new Promise((resolve, reject) => {
-    db.get(
-      `SELECT total_value, cumulative_return 
+  const yesterdayResult = await db.query(
+    `SELECT total_value, cumulative_return 
        FROM portfolio_performance 
-       WHERE user_id = ? AND date = date('now', '-1 day')`,
-      [userId],
-      (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      }
-    );
-  });
+       WHERE user_id = $1 AND date = CURRENT_DATE - INTERVAL '1 day'`,
+    [userId]
+  );
+  const yesterday = yesterdayResult.rows[0];
   
 // Populate portfolio performance history using Yahoo Finance historical data for all holdings
 const { getHistoricalData } = require('./marketDataService');
