@@ -66,13 +66,13 @@ async function createTables() {
     // Market data
     `CREATE TABLE IF NOT EXISTS market_data (
       id TEXT PRIMARY KEY,
-      symbol TEXT NOT NULL,
+      symbol TEXT NOT NULL UNIQUE,
       name TEXT,
       price REAL NOT NULL,
       change_percent REAL,
       change_amount REAL,
-      volume INTEGER,
-      market_cap REAL,
+      volume BIGINT,
+      market_cap BIGINT,
       sector TEXT,
       industry TEXT,
       currency TEXT DEFAULT 'INR',
@@ -189,6 +189,19 @@ async function runMigrations() {
     await pool.query(
       `UPDATE portfolio_holdings SET purchase_price = average_cost WHERE purchase_price IS NULL`
     );
+    // Run custom migration for market_data fixes
+    const fs = require('fs');
+    const path = require('path');
+    const migrationPath = path.join(__dirname, 'migrations', '2025-07-31-fix-market-data.sql');
+    if (fs.existsSync(migrationPath)) {
+      const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
+      for (const statement of migrationSQL.split(';')) {
+        if (statement.trim()) {
+          await pool.query(statement);
+        }
+      }
+      console.log('Market data migration applied');
+    }
     console.log('Migrations completed');
   } catch (error) {
     console.log('Migration error:', error.message);
