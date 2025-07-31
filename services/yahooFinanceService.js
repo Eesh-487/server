@@ -13,13 +13,11 @@ class YahooFinanceService {
     try {
       const cacheKey = `quote_${symbol}`;
       const cached = this.cache.get(cacheKey);
-      
       if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
         return cached.data;
       }
 
       const quote = await yahooFinance.quote(symbol);
-      
       const result = {
         symbol: quote.symbol,
         name: quote.longName || quote.shortName || symbol,
@@ -34,11 +32,24 @@ class YahooFinanceService {
         exchange: quote.fullExchangeName || quote.exchange || 'Unknown',
         lastUpdated: new Date().toISOString()
       };
-
       this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } catch (error) {
       console.error(`Error fetching quote for ${symbol}:`, error);
+      if (error && error.response) {
+        // If error has a response (e.g., axios error)
+        console.error('Yahoo response status:', error.response.status);
+        console.error('Yahoo response data:', error.response.data);
+      } else if (error && error.data) {
+        // If error has a data property
+        console.error('Yahoo error data:', error.data);
+      } else if (error && error.message) {
+        // Log error message
+        console.error('Yahoo error message:', error.message);
+      }
+      if (error && error.stack) {
+        console.error('Yahoo error stack:', error.stack);
+      }
       throw new Error(`Failed to fetch quote for ${symbol}`);
     }
   }
