@@ -18,6 +18,10 @@ class YahooFinanceService {
       }
 
       const quote = await yahooFinance.quote(symbol);
+      if (!quote || typeof quote !== 'object' || !quote.symbol) {
+        console.error(`No valid quote returned for ${symbol}. Skipping.`);
+        return null;
+      }
       const result = {
         symbol: quote.symbol,
         name: quote.longName || quote.shortName || symbol,
