@@ -209,6 +209,7 @@ router.post('/holdings', authenticateToken, [
       currentPrice,
       purchasePrice
     });
+    return;
   } catch (error) {
     logError(`Add holding error for user ${req.user?.userId || 'unknown'}: ${error.stack || error}`);
     res.status(500).json({ error: 'Failed to add holding' });
