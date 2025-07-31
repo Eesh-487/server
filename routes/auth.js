@@ -46,7 +46,7 @@ router.post('/register', [
     // Generate JWT
     const token = jwt.sign(
       { userId, email, name },
-      process.env.JWT_SECRET || '2f8e7c1a-4b3d-4e9a-9c2a-8e7f1b2c3d4e5f6a7b8c9dee1f2a3b4c',
+      process.env.JWT_SECRET ,
       { expiresIn: '7d' }
     );
 
