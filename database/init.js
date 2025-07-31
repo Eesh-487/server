@@ -51,7 +51,8 @@ async function createTables() {
     `CREATE TABLE IF NOT EXISTS portfolio_holdings (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
-      symbol TEXT NOT NULL,
+      asset_type TEXT NOT NULL DEFAULT 'Stock',
+      symbol TEXT,
       name TEXT NOT NULL,
       category TEXT NOT NULL,
       quantity REAL NOT NULL,

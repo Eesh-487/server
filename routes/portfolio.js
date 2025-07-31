@@ -100,10 +100,22 @@ router.get('/holdings', authenticateToken, async (req, res) => {
 // ...existing code...
 // Add holding
 router.post('/holdings', authenticateToken, [
-  body('symbol').trim().isLength({ min: 1 }),
+  body('asset_type').trim().isLength({ min: 1 }),
   body('name').trim().isLength({ min: 1 }),
   body('category').trim().isLength({ min: 1 }),
-  body('quantity').isFloat({ min: 0.001 })
+  body('quantity').isFloat({ min: 0.001 }),
+  body('symbol').custom((value, { req }) => {
+    // Symbol required for all except Cash/Other
+    if (['Cash', 'Other'].includes(req.body.asset_type)) return true;
+    return typeof value === 'string' && value.trim().length > 0;
+  }).withMessage('Symbol is required for this asset type.'),
+  body('purchase_price').custom((value, { req }) => {
+    // Manual price required for Cash/Other
+    if (['Cash', 'Other'].includes(req.body.asset_type)) {
+      return value !== undefined && !isNaN(parseFloat(value));
+    }
+    return true;
+  }).withMessage('Purchase price is required for this asset type.')
   // Removed average_cost validation completely
 ], async (req, res) => {
   try {
@@ -112,29 +124,34 @@ router.post('/holdings', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { symbol, name, category, quantity } = req.body;
+    const { asset_type, symbol, name, category, quantity, purchase_price } = req.body;
     const db = getDatabase();
 
-    // Fetch current market price for the symbol (required now)
+    // Determine price logic based on asset type
     let currentPrice;
     let purchasePrice;
-    
-    try {
-      const marketData = await getMarketData(symbol.toUpperCase());
-      if (marketData && marketData.price > 0) {
-        currentPrice = marketData.price;
-        purchasePrice = currentPrice; // Always use current market price
-      } else {
-        console.error(`[Add Asset] Could not fetch current market price for ${symbol}. marketData:`, marketData);
+    if (['Stock', 'Mutual Fund', 'ETF', 'Bond', 'Commodity', 'Crypto'].includes(asset_type)) {
+      try {
+        const marketData = symbol ? await getMarketData(symbol.toUpperCase()) : null;
+        if (marketData && marketData.price > 0) {
+          currentPrice = marketData.price;
+          purchasePrice = currentPrice;
+        } else {
+          console.error(`[Add Asset] Could not fetch current market price for ${symbol}. marketData:`, marketData);
+          return res.status(400).json({ 
+            error: 'Could not fetch current market price. Please try again later.' 
+          });
+        }
+      } catch (error) {
+        console.error(`[Add Asset] Error fetching market data for ${symbol}:`, error);
         return res.status(400).json({ 
           error: 'Could not fetch current market price. Please try again later.' 
         });
       }
-    } catch (error) {
-      console.error(`[Add Asset] Error fetching market data for ${symbol}:`, error);
-      return res.status(400).json({ 
-        error: 'Could not fetch current market price. Please try again later.' 
-      });
+    } else {
+      // For Cash, Real Estate, Other: use manual price
+      currentPrice = parseFloat(purchase_price);
+      purchasePrice = currentPrice;
     }
 
     // Check if holding already exists (get ALL matching holdings in case of duplicates)
@@ -188,16 +205,16 @@ router.post('/holdings', authenticateToken, [
         [totalQuantity, newAverageCost, currentPrice, existingHolding.id]
       );
 
-      await logAnalyticsEvent(req.user.userId, 'holding_updated', { symbol, quantity, purchase_price: purchasePrice });
+      await logAnalyticsEvent(req.user.userId, 'holding_updated', { asset_type, symbol, quantity, purchase_price: purchasePrice });
     } else {
       // Create new holding
       const holdingId = uuidv4();
       await db.query(
-        'INSERT INTO portfolio_holdings (id, user_id, symbol, name, category, quantity, average_cost, purchase_price, current_price) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-        [holdingId, req.user.userId, symbol.toUpperCase(), name, category, quantity, purchasePrice, purchasePrice, currentPrice]
+        'INSERT INTO portfolio_holdings (id, user_id, asset_type, symbol, name, category, quantity, average_cost, purchase_price, current_price) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+        [holdingId, req.user.userId, asset_type, symbol ? symbol.toUpperCase() : null, name, category, quantity, purchasePrice, purchasePrice, currentPrice]
       );
 
-      await logAnalyticsEvent(req.user.userId, 'holding_added', { symbol, quantity, purchase_price: purchasePrice });
+      await logAnalyticsEvent(req.user.userId, 'holding_added', { asset_type, symbol, quantity, purchase_price: purchasePrice });
     }
 
     // Automatically populate portfolio performance history after adding a holding
