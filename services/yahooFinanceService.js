@@ -311,18 +311,18 @@ class YahooFinanceService {
       const db = getDatabase();
       const { v4: uuidv4 } = require('uuid');
 
-      await new Promise((resolve, reject) => {
-        db.run(
-          `INSERT OR REPLACE INTO market_data 
+      await db.query(
+        `INSERT INTO market_data 
            (id, symbol, price, change_percent, volume, market_cap, timestamp) 
-           VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [uuidv4(), symbol, quote.price, quote.changePercent, quote.volume, quote.marketCap],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
+           VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+         ON CONFLICT (symbol) DO UPDATE SET 
+           price = EXCLUDED.price,
+           change_percent = EXCLUDED.change_percent,
+           volume = EXCLUDED.volume,
+           market_cap = EXCLUDED.market_cap,
+           timestamp = CURRENT_TIMESTAMP`,
+        [uuidv4(), symbol, quote.price, quote.changePercent, quote.volume, quote.marketCap]
+      );
 
       return quote;
     } catch (error) {
