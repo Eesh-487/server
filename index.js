@@ -29,11 +29,6 @@ const { setupWebSocketHandlers } = require('./websocket/handlers');
 const app = express();
 // Ensure logs directory exists for error logging
 const fs = require('fs');
-if (!fs.existsSync(path.join(__dirname, 'logs'))) {
-  fs.mkdirSync(path.join(__dirname, 'logs'));
-}
-// Ensure logs directory exists for logging
-const fs = require('fs');
 const logsDir = path.join(__dirname, 'logs');
 if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir);
@@ -137,7 +132,6 @@ if (process.env.NODE_ENV === 'production') {
   // Serve static files from the React build folder if it exists
   const distPath = path.join(__dirname, '../dist');
   const indexPath = path.join(distPath, 'index.html');
-  const fs = require('fs');
   if (fs.existsSync(distPath) && fs.existsSync(indexPath)) {
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
