@@ -27,6 +27,18 @@ const { startAnalyticsEngine } = require('./services/analyticsEngine');
 const { setupWebSocketHandlers } = require('./websocket/handlers');
 
 const app = express();
+// Ensure logs directory exists for error logging
+const fs = require('fs');
+if (!fs.existsSync(path.join(__dirname, 'logs'))) {
+  fs.mkdirSync(path.join(__dirname, 'logs'));
+}
+// Ensure logs directory exists for logging
+const fs = require('fs');
+const logsDir = path.join(__dirname, 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir);
+  console.log('Created logs directory for error logging');
+}
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
