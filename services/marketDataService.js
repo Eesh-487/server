@@ -120,6 +120,12 @@ async function getMarketData(symbol) {
     // If not in cache or stale, fetch from Yahoo Finance
     const realTimeData = await yahooFinanceService.getQuote(symbol);
     
+    // Check if data was retrieved successfully
+    if (!realTimeData) {
+      console.error(`No data returned from Yahoo Finance for ${symbol}`);
+      return null;
+    }
+    
     // Update database
     await yahooFinanceService.updateMarketDataInDB(symbol);
     

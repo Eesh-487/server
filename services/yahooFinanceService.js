@@ -324,6 +324,13 @@ class YahooFinanceService {
     try {
       const quote = await this.getQuote(symbol);
       const db = getDatabase();
+      
+      // Check if quote is null or undefined
+      if (!quote) {
+        console.error(`No quote data available for ${symbol}`);
+        return null;
+      }
+      
       const { v4: uuidv4 } = require('uuid');
 
       await db.query(
