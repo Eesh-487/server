@@ -240,9 +240,17 @@ router.post('/holdings', authenticateToken, [
       await logAnalyticsEvent(req.user.userId, 'holding_added', { asset_type, symbol, quantity, purchase_price: purchasePrice });
     }
 
-    // Automatically populate portfolio performance history after adding a holding
-    const { populatePortfolioPerformanceFromHistory } = require('../services/portfolioService');
-    await populatePortfolioPerformanceFromHistory(req.user.userId, '1y', '1d');
+    // We need to update the portfolio performance after adding a holding
+    // But the populatePortfolioPerformanceFromHistory function doesn't exist
+    // Let's use the available updatePortfolioPerformance function instead
+    try {
+      const { updatePortfolioPerformance } = require('../services/portfolioService');
+      await updatePortfolioPerformance(req.user.userId);
+    } catch (performanceError) {
+      // Don't let performance update failure prevent the holding from being added
+      console.error(`Error updating portfolio performance: ${performanceError.message}`);
+      // Just log the error and continue
+    }
 
     res.status(201).json({ 
       message: 'Holding added successfully',
