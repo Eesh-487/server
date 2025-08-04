@@ -20,7 +20,6 @@ const performanceRoutes = require('./routes/performance');
 const optimizationRoutes = require('./routes/optimization');
 const analyticsRoutes = require('./routes/analytics');
 const marketDataRoutes = require('./routes/marketData');
-const mutualFundsRoutes = require('./routes/mutualFunds');
 
 const { initializeDatabase } = require('./database/init');
 const { startMarketDataService } = require('./services/marketDataService');
@@ -79,7 +78,6 @@ app.use('/api/performance', performanceRoutes);
 app.use('/api/optimization', optimizationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/market-data', marketDataRoutes);
-app.use('/api/mutual-funds', mutualFundsRoutes);
 
 // Health check with component status
 app.get('/api/health', async (req, res) => {

@@ -130,7 +130,7 @@ router.post('/holdings', authenticateToken, [
     // Determine price logic based on asset type
     let currentPrice;
     let purchasePrice;
-    if (['Stock', 'Mutual Fund', 'ETF', 'Bond', 'Commodity', 'Crypto'].includes(asset_type)) {
+    if (['Stock', 'ETF', 'Bond', 'Commodity', 'Crypto'].includes(asset_type)) {
       try {
         const marketData = symbol ? await getMarketData(symbol.toUpperCase()) : null;
         if (marketData && marketData.price > 0) {
