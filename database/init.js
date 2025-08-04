@@ -122,6 +122,8 @@ async function createTables() {
       expected_return REAL,
       expected_volatility REAL,
       sharpe_improvement REAL,
+      estimation_methods TEXT,
+      sharpe_ratio REAL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id)
     )`,
@@ -190,6 +192,15 @@ async function runMigrations() {
     await pool.query(
       `UPDATE portfolio_holdings SET purchase_price = average_cost WHERE purchase_price IS NULL`
     );
+    
+    // Add new optimization_results columns
+    await pool.query(
+      `ALTER TABLE optimization_results ADD COLUMN IF NOT EXISTS estimation_methods TEXT`
+    );
+    await pool.query(
+      `ALTER TABLE optimization_results ADD COLUMN IF NOT EXISTS sharpe_ratio REAL`
+    );
+    
     console.log('Migrations completed');
   } catch (error) {
     console.log('Migration error:', error.message);

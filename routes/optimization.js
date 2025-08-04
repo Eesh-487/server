@@ -40,8 +40,8 @@ router.post('/optimize', authenticateToken, [
     await db.query(
       `INSERT INTO optimization_results 
          (id, user_id, method, risk_tolerance, current_allocation, optimized_allocation, 
-          expected_return, expected_volatility, sharpe_improvement) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          expected_return, expected_volatility, sharpe_improvement, estimation_methods, sharpe_ratio) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         resultId,
         req.user.userId,
@@ -51,7 +51,9 @@ router.post('/optimize', authenticateToken, [
         JSON.stringify(optimizationResult.optimized_allocation),
         optimizationResult.expected_return,
         optimizationResult.expected_volatility,
-        optimizationResult.sharpe_improvement
+        optimizationResult.sharpe_improvement,
+        JSON.stringify(optimizationResult.estimation_methods),
+        optimizationResult.sharpe_ratio
       ]
     );
 
