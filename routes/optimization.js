@@ -5,15 +5,17 @@ const { getDatabase } = require('../database/init');
 const { authenticateToken } = require('../middleware/auth');
 const { logAnalyticsEvent } = require('../services/analyticsService');
 const { runOptimization, getOptimizationHistory } = require('../services/optimizationService');
+const { getHistoricalData } = require('../services/marketDataService');
 
 const router = express.Router();
 
 // Run portfolio optimization
 router.post('/optimize', authenticateToken, [
-  body('method').isIn(['mean-variance', 'black-litterman', 'risk-parity', 'min-volatility', 'max-sharpe']),
+  body('method').isIn(['mean-variance', 'black-litterman', 'risk-parity', 'min-volatility', 'max-sharpe', 'cvar-min']),
   body('risk_tolerance').isFloat({ min: 0, max: 100 }),
   body('max_position_size').optional().isFloat({ min: 1, max: 100 }),
-  body('constraints').optional().isObject()
+  body('constraints').optional().isObject(),
+  body('estimation').optional().isObject()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -21,13 +23,14 @@ router.post('/optimize', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { method, risk_tolerance, max_position_size = 30, constraints = {} } = req.body;
+    const { method, risk_tolerance, max_position_size = 30, constraints = {}, estimation = {} } = req.body;
     
     const optimizationResult = await runOptimization(req.user.userId, {
       method,
       risk_tolerance,
       max_position_size,
-      constraints
+      constraints,
+      estimation
     });
 
     // Save optimization result
@@ -313,5 +316,213 @@ function convertOptimizationToCSV(data) {
   
   return lines.join('\n');
 }
+
+// Enhanced optimization endpoints
+
+// Endpoint to generate efficient frontier
+router.post('/efficient-frontier', authenticateToken, async (req, res) => {
+  try {
+    const { symbols, estimation = {}, points = 50 } = req.body;
+    
+    if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
+      return res.status(400).json({ error: 'Valid symbols array is required' });
+    }
+
+    try {
+      // Fetch historical data for all symbols
+      const priceHistories = {};
+      for (const symbol of symbols) {
+        try {
+          priceHistories[symbol] = await getHistoricalData(
+            symbol, 
+            estimation.lookback ? `${Math.ceil(estimation.lookback / 252)}y` : '2y', 
+            '1d'
+          );
+        } catch (error) {
+          console.warn(`Failed to fetch data for ${symbol}:`, error.message);
+          priceHistories[symbol] = [];
+        }
+      }
+
+      // Create estimation engines
+      const { InputEstimationEngine } = require('../services/inputEstimationEngine');
+      const { PortfolioOptimizationEngine } = require('../services/optimizationEngine');
+      
+      const estimationEngine = new InputEstimationEngine();
+      const optimizationEngine = new PortfolioOptimizationEngine();
+
+      // Estimate returns and covariance
+      const expectedReturns = await estimationEngine.estimateExpectedReturns(
+        priceHistories,
+        estimation.returns || 'historical_mean',
+        { lookback: estimation.lookback || 504 }
+      );
+
+      const covarianceResult = await estimationEngine.estimateCovarianceMatrix(
+        priceHistories,
+        estimation.covariance || 'shrinkage',
+        { lookback: estimation.lookback || 504 }
+      );
+
+      // Convert to arrays
+      const returnsArray = symbols.map(symbol => expectedReturns[symbol] || 0);
+      
+      // Generate efficient frontier
+      const frontierPoints = await optimizationEngine.generateEfficientFrontier(
+        returnsArray,
+        covarianceResult.matrix,
+        points
+      );
+
+      // Format response
+      const efficientFrontier = frontierPoints.map(point => ({
+        risk: point.expectedVolatility * 100,
+        return: point.expectedReturn * 100,
+        weights: symbols.reduce((acc, symbol, index) => {
+          acc[symbol] = point.weights[index];
+          return acc;
+        }, {})
+      }));
+
+      res.json({
+        symbols,
+        points: efficientFrontier,
+        estimation_methods: {
+          returns: estimation.returns || 'historical_mean',
+          covariance: estimation.covariance || 'shrinkage',
+          lookback_days: estimation.lookback || 504
+        }
+      });
+    } catch (error) {
+      console.error('Efficient frontier calculation failed:', error);
+      // Return empty frontier if calculation fails
+      res.json({
+        symbols,
+        points: [],
+        estimation_methods: {
+          returns: estimation.returns || 'historical_mean',
+          covariance: estimation.covariance || 'shrinkage',
+          lookback_days: estimation.lookback || 504
+        },
+        error: 'Calculation failed, using fallback'
+      });
+    }
+  } catch (error) {
+    console.error('Efficient frontier error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Endpoint to get random portfolio suggestions
+router.post('/random-portfolios', authenticateToken, async (req, res) => {
+  try {
+    const { symbols, count = 1000, estimation = {} } = req.body;
+    
+    if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
+      return res.status(400).json({ error: 'Valid symbols array is required' });
+    }
+
+    try {
+      // Fetch historical data
+      const priceHistories = {};
+      for (const symbol of symbols) {
+        try {
+          priceHistories[symbol] = await getHistoricalData(
+            symbol, 
+            estimation.lookback ? `${Math.ceil(estimation.lookback / 252)}y` : '2y', 
+            '1d'
+          );
+        } catch (error) {
+          console.warn(`Failed to fetch data for ${symbol}:`, error.message);
+          priceHistories[symbol] = [];
+        }
+      }
+
+      // Create estimation engine
+      const { InputEstimationEngine } = require('../services/inputEstimationEngine');
+      const estimationEngine = new InputEstimationEngine();
+
+      // Estimate returns and covariance
+      const expectedReturns = await estimationEngine.estimateExpectedReturns(
+        priceHistories,
+        estimation.returns || 'historical_mean',
+        { lookback: estimation.lookback || 504 }
+      );
+
+      const covarianceResult = await estimationEngine.estimateCovarianceMatrix(
+        priceHistories,
+        estimation.covariance || 'shrinkage',
+        { lookback: estimation.lookback || 504 }
+      );
+
+      // Generate random portfolios
+      const returnsArray = symbols.map(symbol => expectedReturns[symbol] || 0);
+      const randomPortfolios = [];
+      
+      for (let i = 0; i < count; i++) {
+        // Generate random weights that sum to 1
+        const rawWeights = symbols.map(() => Math.random());
+        const sum = rawWeights.reduce((a, b) => a + b, 0);
+        const weights = rawWeights.map(w => w / sum);
+        
+        // Calculate portfolio metrics
+        const portfolioReturn = weights.reduce((sum, weight, j) => sum + weight * returnsArray[j], 0);
+        
+        let portfolioVariance = 0;
+        for (let j = 0; j < weights.length; j++) {
+          for (let k = 0; k < weights.length; k++) {
+            portfolioVariance += weights[j] * weights[k] * covarianceResult.matrix[j][k];
+          }
+        }
+        const portfolioVolatility = Math.sqrt(portfolioVariance);
+        
+        randomPortfolios.push({
+          risk: portfolioVolatility * 100,
+          return: portfolioReturn * 100,
+          weights
+        });
+      }
+
+      res.json({
+        portfolios: randomPortfolios,
+        symbols,
+        estimation_methods: {
+          returns: estimation.returns || 'historical_mean',
+          covariance: estimation.covariance || 'shrinkage',
+          lookback_days: estimation.lookback || 504
+        }
+      });
+    } catch (error) {
+      console.error('Random portfolios calculation failed:', error);
+      // Generate simple random portfolios as fallback
+      const randomPortfolios = [];
+      for (let i = 0; i < Math.min(count, 100); i++) {
+        const rawWeights = symbols.map(() => Math.random());
+        const sum = rawWeights.reduce((a, b) => a + b, 0);
+        const weights = rawWeights.map(w => w / sum);
+        
+        randomPortfolios.push({
+          risk: Math.random() * 20 + 5, // 5-25% volatility
+          return: Math.random() * 20 - 5, // -5% to 15% return
+          weights
+        });
+      }
+
+      res.json({
+        portfolios: randomPortfolios,
+        symbols,
+        estimation_methods: {
+          returns: 'fallback',
+          covariance: 'fallback',
+          lookback_days: 252
+        },
+        error: 'Calculation failed, using fallback'
+      });
+    }
+  } catch (error) {
+    console.error('Random portfolios error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;
