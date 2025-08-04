@@ -34,7 +34,14 @@ const MUTUAL_FUND_MAPPING = {
   
   // ELSS Funds
   'INF090I01KW1': '0P0000XNHO.BO', // Axis Long Term Equity Fund
-  'INF179K01VC8': '0P0000X4DD.BO'  // HDFC Taxsaver
+  'INF179K01VC8': '0P0000X4DD.BO',  // HDFC Taxsaver
+  
+  // Direct Yahoo Finance symbols (from error logs)
+  'TCH-F68.TA': 'TCH-F68.TA', // Israeli Tech Fund
+  'TCH-F120.TA': 'TCH-F120.TA', // Israeli Tech Fund
+  'TCH-F9.TA': 'TCH-F9.TA', // Israeli Tech Fund
+  'TCH-F11.TA': 'TCH-F11.TA', // Israeli Tech Fund
+  '11DPR.BO': '11DPR.BO' // Direct Mutual Fund symbol
 };
 
 class MutualFundService {
@@ -60,17 +67,34 @@ class MutualFundService {
       const matchingFunds = Object.keys(MUTUAL_FUND_MAPPING).filter(amfiCode => {
         // Get the Yahoo symbol
         const yahooSymbol = MUTUAL_FUND_MAPPING[amfiCode];
-        return amfiCode.toLowerCase().includes(query) || yahooSymbol.toLowerCase().includes(query);
+        return amfiCode.toLowerCase().includes(query) || 
+               yahooSymbol.toLowerCase().includes(query);
       });
       
-      // Get data for matching funds
+      // Add direct Yahoo symbols if they appear to be funds
+      // Check if query itself looks like a symbol (has uppercase letters)
+      if (query !== query.toLowerCase() || query.includes('.') || query.includes('-')) {
+        try {
+          // Try to get data directly for what might be a Yahoo symbol
+          const directData = await this.getMutualFundData(query);
+          if (directData) {
+            results.push(directData);
+          }
+        } catch (err) {
+          console.error(`Error fetching direct symbol ${query}:`, err);
+        }
+      }
+      
+      // Get data for matching AMFI funds
       if (matchingFunds.length > 0) {
         const fundPromises = matchingFunds.map(amfiCode => this.getMutualFundData(amfiCode));
         const fundResults = await Promise.allSettled(fundPromises);
         
-        results = fundResults
+        const mappedResults = fundResults
           .filter(result => result.status === 'fulfilled' && result.value)
           .map(result => result.value);
+        
+        results = [...results, ...mappedResults];
       }
       
       // If no results from direct mapping or we have very few results, try a more generic search
@@ -155,18 +179,29 @@ class MutualFundService {
   }
 
   // Get mutual fund NAV and details
-  async getMutualFundData(amfiCode) {
+  async getMutualFundData(symbol) {
     try {
-      const cacheKey = `mf_${amfiCode}`;
+      const cacheKey = `mf_${symbol}`;
       const cached = this.cache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
         return cached.data;
       }
-
-      const yahooSymbol = this.getYahooSymbol(amfiCode);
-      if (!yahooSymbol) {
-        console.error(`No Yahoo Finance mapping for AMFI code ${amfiCode}`);
-        return null;
+      
+      // Determine if this is an AMFI code or a Yahoo Finance symbol
+      let yahooSymbol;
+      let isDirectYahooSymbol = false;
+      
+      // Check if it looks like a Yahoo Finance symbol (contains '.' or '-')
+      if (symbol.includes('.') || symbol.includes('-')) {
+        yahooSymbol = symbol;
+        isDirectYahooSymbol = true;
+      } else {
+        // Try to map from AMFI code
+        yahooSymbol = this.getYahooSymbol(symbol);
+        if (!yahooSymbol) {
+          console.error(`No Yahoo Finance mapping for AMFI code ${symbol}`);
+          return null;
+        }
       }
 
       // Use quote endpoint to get NAV data
@@ -181,7 +216,7 @@ class MutualFundService {
       const details = await yahooFinance.quoteSummary(yahooSymbol, { modules });
 
       const result = {
-        symbol: amfiCode,
+        symbol: isDirectYahooSymbol ? symbol : symbol, // Keep the original symbol
         yahooSymbol: yahooSymbol,
         name: quote.longName || quote.shortName || '',
         nav: quote.regularMarketPrice || 0,
@@ -195,6 +230,7 @@ class MutualFundService {
         category: details.fundProfile?.categoryName || 'Equity',
         aum: details.fundProfile?.totalAssets?.fmt || '0',
         ytd_return: details.fundProfile?.ytdReturn || 0,
+        type: 'mutualfund', // Explicitly mark as mutual fund
         min_investment: 5000, // Default, as Yahoo doesn't provide this
         exit_load: '1% if redeemed within 1 year', // Default, as Yahoo doesn't provide this
         lastUpdated: new Date().toISOString()
