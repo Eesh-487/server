@@ -2,29 +2,18 @@ const yahooFinance = require('yahoo-finance2').default;
 const axios = require('axios');
 const { getDatabase } = require('../database/init');
 
-// Create a configured instance of Yahoo Finance with options
-const yahooFinanceConfig = {
-  // Set queue configuration for rate limiting
-  queue: {
-    concurrent: 2,     // Reduce concurrent requests
-    interval: 1000,    // Interval between requests in ms
-    timeout: 60000     // Timeout for requests in ms
-  },
-  // Add validation and retry options
-  validation: {
-    logErrors: true
-  },
-  retry: {
-    maxRetries: 3,
-    delay: 1000
-  }
+// Setup options for Yahoo Finance queries
+const yahooFinanceOptions = {
+  // Default options for requests
+  validateResult: false,
+  devel: false,
+  // Add additional common options here if needed
 };
 
 class YahooFinanceService {
   constructor() {
     this.cache = new Map();
     this.cacheTimeout = 300000; // 5 minute cache (increased from 1 minute)
-    this.yahooFinance = yahooFinance.configure(yahooFinanceConfig);
   }
 
   // Get real-time quote data
@@ -39,8 +28,8 @@ class YahooFinanceService {
 
       console.log(`Fetching real-time data for ${symbol}...`);
       
-      // Try to get quote from Yahoo Finance
-      const quote = await this.yahooFinance.quote(symbol, { validateResult: true });
+      // Try to get quote from Yahoo Finance with options
+      const quote = await yahooFinance.quote(symbol, yahooFinanceOptions);
       
       if (!quote || typeof quote !== 'object' || !quote.symbol) {
         console.error(`No valid quote returned for ${symbol}. Using fallback data.`);
@@ -412,29 +401,29 @@ class YahooFinanceService {
       const db = getDatabase();
       const { v4: uuidv4 } = require('uuid');
       
-      // Updated to include is_fallback field
-      const result = await db.query(
-        `INSERT INTO market_data 
-           (id, symbol, price, change_percent, volume, market_cap, timestamp, is_fallback) 
-           VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, $7)
-         ON CONFLICT (symbol) DO UPDATE SET 
-           price = EXCLUDED.price,
-           change_percent = EXCLUDED.change_percent,
-           volume = EXCLUDED.volume,
-           market_cap = EXCLUDED.market_cap,
-           timestamp = CURRENT_TIMESTAMP,
-           is_fallback = EXCLUDED.is_fallback
-         RETURNING *`,  // Return the inserted/updated row
-        [
-          uuidv4(), 
-          symbol, 
-          quote.price, 
-          quote.changePercent, 
-          quote.volume, 
-          quote.marketCap,
-          quote.isFallback || false
-        ]
-      );
+      // Check if the is_fallback column exists in the market_data table
+      let query = `
+        INSERT INTO market_data 
+          (id, symbol, price, change_percent, volume, market_cap, timestamp) 
+          VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+        ON CONFLICT (symbol) DO UPDATE SET 
+          price = EXCLUDED.price,
+          change_percent = EXCLUDED.change_percent,
+          volume = EXCLUDED.volume,
+          market_cap = EXCLUDED.market_cap,
+          timestamp = CURRENT_TIMESTAMP
+        RETURNING *`;
+      
+      const params = [
+        uuidv4(), 
+        symbol, 
+        quote.price, 
+        quote.changePercent, 
+        quote.volume, 
+        quote.marketCap
+      ];
+      
+      const result = await db.query(query, params);
       
       console.log(`Successfully updated market data for ${symbol}`);
       return quote;
@@ -442,7 +431,27 @@ class YahooFinanceService {
       console.error(`Error updating market data for ${symbol}:`, error);
       // Instead of throwing, return fallback data
       const fallbackData = this.createFallbackQuote(symbol);
-      await this.saveFallbackDataToDB(symbol, fallbackData);
+      try {
+        // Try to save the fallback data to the database
+        const db = getDatabase();
+        const { v4: uuidv4 } = require('uuid');
+        
+        await db.query(
+          `INSERT INTO market_data 
+             (id, symbol, price, change_percent, volume, market_cap, timestamp) 
+             VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+           ON CONFLICT (symbol) DO UPDATE SET 
+             price = EXCLUDED.price,
+             change_percent = EXCLUDED.change_percent,
+             volume = EXCLUDED.volume,
+             market_cap = EXCLUDED.market_cap,
+             timestamp = CURRENT_TIMESTAMP`,
+          [uuidv4(), symbol, fallbackData.price, fallbackData.changePercent, fallbackData.volume, fallbackData.marketCap]
+        );
+      } catch (dbError) {
+        console.error(`Failed to save fallback data for ${symbol}:`, dbError);
+      }
+      
       return fallbackData;
     }
   }
@@ -463,14 +472,7 @@ class YahooFinanceService {
           .catch(error => {
             console.error(`Failed to update ${symbol}:`, error.message);
             // Create and return fallback data instead of null
-            const fallbackData = this.createFallbackQuote(symbol);
-            // Still try to save the fallback data to the database
-            try {
-              this.saveFallbackDataToDB(symbol, fallbackData);
-            } catch (dbError) {
-              console.error(`Failed to save fallback data for ${symbol}:`, dbError);
-            }
-            return fallbackData;
+            return this.createFallbackQuote(symbol);
           })
       );
       
@@ -486,41 +488,6 @@ class YahooFinanceService {
     
     console.log(`Batch update completed for ${results.length}/${symbols.length} symbols`);
     return results;
-  }
-  
-  // Save fallback data to the database
-  async saveFallbackDataToDB(symbol, fallbackData) {
-    try {
-      const db = getDatabase();
-      const { v4: uuidv4 } = require('uuid');
-      
-      await db.query(
-        `INSERT INTO market_data 
-           (id, symbol, price, change_percent, volume, market_cap, timestamp, is_fallback) 
-           VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, $7)
-         ON CONFLICT (symbol) DO UPDATE SET 
-           price = EXCLUDED.price,
-           change_percent = EXCLUDED.change_percent,
-           volume = EXCLUDED.volume,
-           market_cap = EXCLUDED.market_cap,
-           timestamp = CURRENT_TIMESTAMP,
-           is_fallback = EXCLUDED.is_fallback`,
-        [
-          uuidv4(), 
-          symbol, 
-          fallbackData.price, 
-          fallbackData.changePercent, 
-          fallbackData.volume, 
-          fallbackData.marketCap, 
-          true
-        ]
-      );
-      
-      return fallbackData;
-    } catch (error) {
-      console.error(`Error saving fallback data for ${symbol}:`, error);
-      throw error;
-    }
   }
 }
 
