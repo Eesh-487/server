@@ -1,5 +1,5 @@
 const yahooFinance = require('yahoo-finance2').default;
-const { YahooFinanceService } = require('./yahooFinanceService');
+const YahooFinanceService = require('./yahooFinanceService');
 
 // AMFI code to Yahoo Finance symbol mapping
 const MUTUAL_FUND_MAPPING = {
@@ -39,7 +39,7 @@ const MUTUAL_FUND_MAPPING = {
 
 class MutualFundService {
   constructor() {
-    this.yahooService = new YahooFinanceService();
+    this.yahooService = YahooFinanceService; // Using the singleton instance directly
     this.cache = new Map();
     this.cacheTimeout = 3600000; // 1 hour cache for mutual funds (NAVs update less frequently)
   }
