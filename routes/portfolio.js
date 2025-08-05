@@ -132,7 +132,13 @@ router.post('/holdings', authenticateToken, [
           // Determine price logic based on asset type
     let currentPrice = 0;
     let purchasePrice = 0;
-    if (['Stock', 'ETF', 'Bond', 'Commodity', 'Crypto'].includes(asset_type)) {
+    if (['Cash', 'Other', 'Real Estate'].includes(asset_type)) {
+      // For these asset types, use the provided purchase price directly
+      currentPrice = purchase_price || 100.00;
+      purchasePrice = purchase_price || 100.00;
+      console.log(`Using provided price for ${asset_type}: ${currentPrice}`);
+    }
+    else if (['Stock', 'ETF', 'Bond', 'Commodity', 'Crypto'].includes(asset_type) && symbol) {
       try {
         const marketData = symbol ? await getMarketData(symbol.toUpperCase()) : null;
         if (marketData && marketData.price > 0) {
@@ -166,12 +172,16 @@ router.post('/holdings', authenticateToken, [
         currentPrice = purchase_price || 100.00;
         purchasePrice = currentPrice;
       }
+    } else {
+      // For any other asset types or missing symbols
+      currentPrice = purchase_price || 100.00;
+      purchasePrice = purchase_price || 100.00;
     }
 
     // Check if holding already exists (get ALL matching holdings in case of duplicates)
     const existingHoldingsResult = await db.query(
       'SELECT id, quantity, average_cost FROM portfolio_holdings WHERE user_id = $1 AND symbol = $2',
-      [req.user.userId, symbol.toUpperCase()]
+      [req.user.userId, symbol ? symbol.toUpperCase() : null]
     );
     const existingHoldings = existingHoldingsResult.rows;
 
@@ -209,7 +219,37 @@ router.post('/holdings', authenticateToken, [
     }
 
     try {
-      // (all the code remains the same)
+      if (existingHolding) {
+        console.log(`Updating existing holding for ${symbol}`);
+        // Calculate new average cost using the weighted average method
+        const totalShares = existingHolding.quantity + quantity;
+        const newAverageCost = ((existingHolding.quantity * existingHolding.average_cost) + (quantity * purchasePrice)) / totalShares;
+        
+        // Update the existing holding
+        await db.query(
+          'UPDATE portfolio_holdings SET quantity = $1, average_cost = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+          [totalShares, newAverageCost, existingHolding.id]
+        );
+      } else {
+        console.log(`Creating new holding for ${symbol}`);
+        // Create a new holding
+        const holdingId = uuidv4();
+        await db.query(
+          'INSERT INTO portfolio_holdings (id, user_id, asset_type, symbol, name, category, quantity, average_cost, purchase_price, current_price) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+          [
+            holdingId,
+            req.user.userId,
+            asset_type,
+            symbol ? symbol.toUpperCase() : null,
+            name,
+            category,
+            quantity,
+            purchasePrice,
+            purchase_price,
+            currentPrice
+          ]
+        );
+      }
     } catch (error) {
       console.error(`Error in holding update/create logic: ${error}`);
       return res.status(500).json({ error: 'An unexpected error occurred processing the holding' });
