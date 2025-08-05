@@ -110,7 +110,7 @@ router.post('/holdings', authenticateToken, [
   }).withMessage('Purchase price is required for this asset type.')
 ], async (req, res) => {
   try {
-    console.log('Received holding data:', req.body);
+    console.log('Received holding data:', JSON.stringify(req.body, null, 2));
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       console.log('Validation errors:', errors.array());
@@ -122,10 +122,30 @@ router.post('/holdings', authenticateToken, [
     const symbol = req.body.symbol || null;
     const name = req.body.name;
     const category = req.body.category;
+    // Make sure quantity is a proper number
     const quantity = parseFloat(req.body.quantity);
-    const purchase_price = req.body.purchase_price ? parseFloat(req.body.purchase_price) : null;
+    if (isNaN(quantity)) {
+      return res.status(400).json({ error: 'Invalid quantity value' });
+    }
     
-    console.log('Adding holding:', { asset_type, symbol, name, category, quantity, purchase_price });
+    // Handle purchase_price carefully
+    let purchase_price = null;
+    if (req.body.purchase_price !== undefined && req.body.purchase_price !== null && req.body.purchase_price !== '') {
+      purchase_price = parseFloat(req.body.purchase_price);
+      if (isNaN(purchase_price)) {
+        return res.status(400).json({ error: 'Invalid purchase price value' });
+      }
+    }
+    
+    console.log('Processed holding data:', { 
+      asset_type, 
+      symbol, 
+      name, 
+      category, 
+      quantity, 
+      purchase_price,
+      purchase_price_raw: req.body.purchase_price 
+    });
 
     const db = getDatabase();
 
@@ -220,20 +240,44 @@ router.post('/holdings', authenticateToken, [
 
     try {
       if (existingHolding) {
-        console.log(`Updating existing holding for ${symbol}`);
+        console.log(`Updating existing holding for ${symbol}`, existingHolding);
+        
+        // Verify the values before calculations
+        console.log(`Calculations: existingQuantity=${existingHolding.quantity}, quantity=${quantity}, existingCost=${existingHolding.average_cost}, purchasePrice=${purchasePrice}`);
+        
         // Calculate new average cost using the weighted average method
         const totalShares = existingHolding.quantity + quantity;
         const newAverageCost = ((existingHolding.quantity * existingHolding.average_cost) + (quantity * purchasePrice)) / totalShares;
+        
+        console.log(`Calculated values: totalShares=${totalShares}, newAverageCost=${newAverageCost}`);
         
         // Update the existing holding
         await db.query(
           'UPDATE portfolio_holdings SET quantity = $1, average_cost = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
           [totalShares, newAverageCost, existingHolding.id]
         );
+        
+        console.log(`Successfully updated holding ${existingHolding.id}`);
       } else {
-        console.log(`Creating new holding for ${symbol}`);
+        console.log(`Creating new holding for ${symbol || 'non-stock asset'}`);
+        
         // Create a new holding
         const holdingId = uuidv4();
+        
+        // Log the parameters
+        console.log('Insert parameters:', {
+          id: holdingId,
+          userId: req.user.userId,
+          assetType: asset_type,
+          symbol: symbol ? symbol.toUpperCase() : null,
+          name,
+          category,
+          quantity,
+          purchasePrice,
+          purchasePriceInput: purchase_price,
+          currentPrice
+        });
+        
         await db.query(
           'INSERT INTO portfolio_holdings (id, user_id, asset_type, symbol, name, category, quantity, average_cost, purchase_price, current_price) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
           [
@@ -249,10 +293,16 @@ router.post('/holdings', authenticateToken, [
             currentPrice
           ]
         );
+        
+        console.log(`Successfully created new holding with ID ${holdingId}`);
       }
     } catch (error) {
-      console.error(`Error in holding update/create logic: ${error}`);
-      return res.status(500).json({ error: 'An unexpected error occurred processing the holding' });
+      console.error('Detailed error in holding update/create logic:', error);
+      console.error('Error SQL state:', error.code);
+      console.error('Error message:', error.message);
+      console.error('Error detail:', error.detail);
+      console.error('Error constraint:', error.constraint);
+      return res.status(500).json({ error: 'An unexpected error occurred processing the holding', details: error.message });
     }
 
     // We need to update the portfolio performance after adding a holding
@@ -278,19 +328,29 @@ router.post('/holdings', authenticateToken, [
     
     // Send more specific error message to help with debugging
     let errorMessage = 'Failed to add holding';
+    let errorDetail = '';
     
     if (error.code === '23505') {
       errorMessage = 'A holding with this symbol already exists';
+      errorDetail = error.detail || '';
     } else if (error.code === '23503') {
       errorMessage = 'Referenced record does not exist';
+      errorDetail = error.detail || '';
     } else if (error.code === '42P01') {
       errorMessage = 'Database table not found';
+    } else if (error.code === '22P02') {
+      errorMessage = 'Invalid input syntax for type';
+      errorDetail = error.detail || '';
     } else if (error.message) {
       // Include the actual error message (sanitized) to help with debugging
-      errorMessage = `Error: ${error.message.substring(0, 100)}`;
+      errorDetail = error.message.substring(0, 200);
     }
     
-    res.status(500).json({ error: errorMessage });
+    console.error('Sending error response:', errorMessage, errorDetail);
+    res.status(500).json({ 
+      error: errorMessage,
+      detail: errorDetail 
+    });
   }
 });
 
