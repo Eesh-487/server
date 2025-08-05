@@ -69,18 +69,12 @@ async function updateMarketData(io) {
     
     // Broadcast updates via WebSocket
     if (io && updates.length > 0) {
+      // Emit the entire array of updates at once (for bulk updates)
+      io.emit('market_data_update', updates);
+      
+      // Also emit individual updates to symbol-specific rooms
       updates.forEach(update => {
         if (update) {
-          io.emit('market_data_update', {
-            symbol: update.symbol,
-            price: update.price,
-            change: update.change,
-            changePercent: update.changePercent,
-            volume: update.volume,
-            timestamp: update.lastUpdated
-          });
-          
-          // Emit to symbol-specific rooms
           io.to(`market_${update.symbol}`).emit('market_update', update);
         }
       });
