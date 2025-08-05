@@ -18,6 +18,11 @@ class YahooFinanceService {
 
   // Get real-time quote data
   async getQuote(symbol) {
+    if (!symbol) {
+      console.warn('getQuote called without a symbol');
+      return this.createFallbackQuote('UNKNOWN');
+    }
+
     try {
       const cacheKey = `quote_${symbol}`;
       const cached = this.cache.get(cacheKey);
