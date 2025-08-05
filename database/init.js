@@ -193,6 +193,24 @@ async function runMigrations() {
       `UPDATE portfolio_holdings SET purchase_price = average_cost WHERE purchase_price IS NULL`
     );
     
+    // Add asset_type column if not exists
+    await pool.query(
+      `ALTER TABLE portfolio_holdings ADD COLUMN IF NOT EXISTS asset_type TEXT`
+    );
+    await pool.query(
+      `UPDATE portfolio_holdings SET asset_type = 'Stock' WHERE asset_type IS NULL`
+    );
+    
+    // Add NOT NULL constraint to asset_type after ensuring all rows have a value
+    try {
+      await pool.query(
+        `ALTER TABLE portfolio_holdings ALTER COLUMN asset_type SET NOT NULL`
+      );
+    } catch (constraintError) {
+      console.warn('Could not set NOT NULL constraint on asset_type:', constraintError.message);
+      // Not critical if this fails, we'll just continue
+    }
+    
     // Add new optimization_results columns
     await pool.query(
       `ALTER TABLE optimization_results ADD COLUMN IF NOT EXISTS estimation_methods TEXT`

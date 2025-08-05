@@ -117,6 +117,28 @@ router.post('/holdings', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    // Check if asset_type column exists in the database
+    try {
+      const db = getDatabase();
+      const checkColumn = await db.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name='portfolio_holdings' AND column_name='asset_type'
+      `);
+      
+      const hasAssetTypeColumn = checkColumn.rows.length > 0;
+      console.log('Database has asset_type column:', hasAssetTypeColumn);
+      
+      if (!hasAssetTypeColumn) {
+        // Add the column if it doesn't exist
+        await db.query(`ALTER TABLE portfolio_holdings ADD COLUMN IF NOT EXISTS asset_type TEXT DEFAULT 'Stock'`);
+        console.log('Added asset_type column to portfolio_holdings table');
+      }
+    } catch (schemaError) {
+      console.error('Error checking schema:', schemaError);
+      // Continue execution even if this check fails
+    }
+
     // Set default values if not provided
     const asset_type = req.body.asset_type || 'Stock';
     const symbol = req.body.symbol || null;
@@ -279,18 +301,18 @@ router.post('/holdings', authenticateToken, [
         });
         
         await db.query(
-          'INSERT INTO portfolio_holdings (id, user_id, asset_type, symbol, name, category, quantity, average_cost, purchase_price, current_price) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+          'INSERT INTO portfolio_holdings (id, user_id, symbol, name, category, quantity, average_cost, purchase_price, current_price, asset_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
           [
             holdingId,
             req.user.userId,
-            asset_type,
             symbol ? symbol.toUpperCase() : null,
             name,
             category,
             quantity,
             purchasePrice,
             purchase_price,
-            currentPrice
+            currentPrice,
+            asset_type
           ]
         );
         
