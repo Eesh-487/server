@@ -1,6 +1,18 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
+const { v4: uui    // Portfolio performance
+    `CREATE TABLE IF NOT EXISTS portfolio_performance (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      date DATE NOT NULL,
+      total_value REAL NOT NULL,
+      daily_return REAL,
+      cumulative_return REAL,
+      benchmark_return REAL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id),
+      UNIQUE(user_id, date)
+    )`,ire('uuid');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -201,14 +213,27 @@ async function runMigrations() {
       `UPDATE portfolio_holdings SET asset_type = 'Stock' WHERE asset_type IS NULL`
     );
     
-    // Add NOT NULL constraint to asset_type after ensuring all rows have a value
+    // Add UNIQUE constraint to portfolio_performance if it doesn't exist
     try {
-      await pool.query(
-        `ALTER TABLE portfolio_holdings ALTER COLUMN asset_type SET NOT NULL`
+      // Check if the constraint already exists
+      const constraintCheck = await pool.query(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_name = 'portfolio_performance'
+         AND constraint_type = 'UNIQUE'
+         AND constraint_name = 'portfolio_performance_user_date_key'`
       );
+      
+      if (constraintCheck.rows.length === 0) {
+        // Add the constraint if it doesn't exist
+        await pool.query(
+          `ALTER TABLE portfolio_performance ADD CONSTRAINT portfolio_performance_user_date_key UNIQUE (user_id, date)`
+        );
+        console.log('Added unique constraint to portfolio_performance table');
+      }
     } catch (constraintError) {
-      console.warn('Could not set NOT NULL constraint on asset_type:', constraintError.message);
-      // Not critical if this fails, we'll just continue
+      console.warn('Error adding unique constraint to portfolio_performance:', constraintError.message);
+      // Not critical if this fails
     }
     
     // Add new optimization_results columns
