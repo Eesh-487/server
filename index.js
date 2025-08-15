@@ -38,15 +38,23 @@ const server = createServer(app);
 const io = new Server(server, {
   cors: {
     origin: [
+      'https://stocks-frontend-wheat.vercel.app', // Vercel frontend
       'http://localhost:5173',
-      'http://192.168.1.9:5173'
+      'http://192.168.1.9:5173',
+      'https://stocks-frontend-git-master-eesh-487s-projects.vercel.app'
     ],
-    methods: ["GET", "POST", "PUT", "DELETE"]
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
   }
 });
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// Configure CORS before other middleware
 app.use(cors({
   origin: [
     'https://stocks-frontend-wheat.vercel.app', // Vercel frontend
@@ -54,8 +62,19 @@ app.use(cors({
     'http://192.168.1.9:5173',
     'https://stocks-frontend-git-master-eesh-487s-projects.vercel.app'
   ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
+
+// Add fallback CORS headers for preflight requests
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).send();
+});
 
 // Rate limiting - Generous limits for development
 const limiter = rateLimit({
@@ -63,6 +82,23 @@ const limiter = rateLimit({
   max: 10000 // limit each IP to 10,000 requests per windowMs (much higher for development)
 });
 app.use(limiter);
+
+// Ensure CORS headers are set on all responses
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && [
+    'https://stocks-frontend-wheat.vercel.app',
+    'http://localhost:5173',
+    'http://192.168.1.9:5173',
+    'https://stocks-frontend-git-master-eesh-487s-projects.vercel.app'
+  ].includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
 
 // General middleware
 app.use(compression());
