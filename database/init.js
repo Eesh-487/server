@@ -27,7 +27,7 @@ async function createTables() {
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
       name TEXT,
       role TEXT DEFAULT 'user',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -47,7 +47,8 @@ async function createTables() {
       category TEXT,
       notes TEXT,
       target_allocation REAL,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
     // Market data cache
@@ -72,7 +73,8 @@ async function createTables() {
       daily_return REAL,
       cumulative_return REAL,
       benchmark_return REAL,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
     // Risk metrics
@@ -88,7 +90,8 @@ async function createTables() {
       alpha REAL,
       var_95 REAL,
       cvar_95 REAL,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
     // User settings
@@ -103,7 +106,9 @@ async function createTables() {
       notifications_risk_alerts BOOLEAN DEFAULT true,
       notifications_email BOOLEAN DEFAULT true,
       notifications_push BOOLEAN DEFAULT true,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
     // Price alerts
@@ -116,7 +121,7 @@ async function createTables() {
       is_active BOOLEAN DEFAULT true,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       triggered_at TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
     // Transaction history
@@ -130,7 +135,8 @@ async function createTables() {
       fees REAL DEFAULT 0,
       date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       notes TEXT,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
     // Optimization results
@@ -144,17 +150,20 @@ async function createTables() {
       expected_return REAL,
       expected_risk REAL,
       sharpe_ratio REAL,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
     // Analytics events
     `CREATE TABLE IF NOT EXISTS analytics_events (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
+      user_id TEXT,
       event_type TEXT NOT NULL,
       event_data TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
       timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     )`,
     
     // Mutual funds data
@@ -182,7 +191,7 @@ async function createTables() {
       user_id TEXT NOT NULL,
       symbol TEXT NOT NULL,
       added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`
   ];
 
@@ -280,7 +289,7 @@ async function createTestUser() {
       const hashedPassword = await bcrypt.hash('password123', 10);
       
       await pool.query(
-        'INSERT INTO users (id, email, password, name, role) VALUES ($1, $2, $3, $4, $5)',
+        'INSERT INTO users (id, email, password_hash, name, role) VALUES ($1, $2, $3, $4, $5)',
         [userId, 'test@example.com', hashedPassword, 'Test User', 'user']
       );
       
