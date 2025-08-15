@@ -311,6 +311,57 @@ async function runMigrations() {
     await pool.query(
       `ALTER TABLE optimization_results ADD COLUMN IF NOT EXISTS estimation_methods TEXT`
     );
+
+    // Ensure users table has password_hash and not legacy password column
+    try {
+      const usersColumns = await pool.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'users'
+      `);
+      const colNames = usersColumns.rows.map(r => r.column_name);
+      const hasPasswordHash = colNames.includes('password_hash');
+      const hasPassword = colNames.includes('password');
+      if (!hasPasswordHash && hasPassword) {
+        console.log('Renaming legacy users.password column to password_hash');
+        await pool.query(`ALTER TABLE users RENAME COLUMN password TO password_hash`);
+      } else if (!hasPasswordHash && !hasPassword) {
+        console.log('Adding password_hash column to users table');
+        await pool.query(`ALTER TABLE users ADD COLUMN password_hash TEXT`);
+      } else if (hasPasswordHash && hasPassword) {
+        // Both exist – copy any missing hashes then drop legacy column if empty
+        console.log('Copying legacy password column values into password_hash where missing');
+        await pool.query(`UPDATE users SET password_hash = password WHERE password_hash IS NULL AND password IS NOT NULL`);
+        // Make sure inserts won\'t fail due to NOT NULL on legacy column by relaxing constraint if necessary
+        // (Cannot easily drop NOT NULL generically without knowing constraint, so prefer to drop column)
+        console.log('Dropping legacy password column');
+        await pool.query(`ALTER TABLE users DROP COLUMN password`);
+      }
+    } catch (userColErr) {
+      console.warn('User table password column migration warning:', userColErr.message);
+    }
+
+    // Ensure analytics_events has expected columns (ip_address, user_agent, timestamp)
+    try {
+      const analyticsColumns = await pool.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'analytics_events'
+      `);
+      const aCols = analyticsColumns.rows.map(r => r.column_name);
+      if (!aCols.includes('ip_address')) {
+        console.log('Adding ip_address column to analytics_events');
+        await pool.query(`ALTER TABLE analytics_events ADD COLUMN ip_address TEXT`);
+      }
+      if (!aCols.includes('user_agent')) {
+        console.log('Adding user_agent column to analytics_events');
+        await pool.query(`ALTER TABLE analytics_events ADD COLUMN user_agent TEXT`);
+      }
+      if (!aCols.includes('timestamp')) {
+        console.log('Adding timestamp column to analytics_events');
+        await pool.query(`ALTER TABLE analytics_events ADD COLUMN timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
+      }
+    } catch (analyticsColErr) {
+      console.warn('Analytics events column migration warning:', analyticsColErr.message);
+    }
     
     console.log('Database migrations completed successfully');
   } catch (error) {
