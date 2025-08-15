@@ -186,16 +186,10 @@ router.post('/watchlist', authenticateToken, async (req, res) => {
     const watchlistId = require('uuid').v4();
 
     try {
-      await new Promise((resolve, reject) => {
-        db.run(
-          'INSERT INTO watchlist (id, user_id, symbol) VALUES (?, ?, ?)',
-          [watchlistId, req.user.userId, symbol.toUpperCase()],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
+      await db.query(
+        'INSERT INTO watchlist (id, user_id, symbol) VALUES ($1, $2, $3)',
+        [watchlistId, req.user.userId, symbol.toUpperCase()]
+      );
 
       // Track symbol for real-time updates
       addSymbolToTracking(symbol);
@@ -220,16 +214,11 @@ router.get('/watchlist', authenticateToken, async (req, res) => {
   try {
     const db = getDatabase();
 
-    const watchlist = await new Promise((resolve, reject) => {
-      db.all(
-        'SELECT symbol, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC',
-        [req.user.userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-      );
-    });
+    const watchlistResult = await db.query(
+      'SELECT symbol, added_at FROM watchlist WHERE user_id = $1 ORDER BY added_at DESC',
+      [req.user.userId]
+    );
+    const watchlist = watchlistResult.rows || [];
 
     // Enrich with current market data
     const enrichedWatchlist = await Promise.all(
@@ -268,16 +257,10 @@ router.delete('/watchlist/:symbol', authenticateToken, async (req, res) => {
     const { symbol } = req.params;
     const db = getDatabase();
 
-    await new Promise((resolve, reject) => {
-      db.run(
-        'DELETE FROM watchlist WHERE user_id = ? AND symbol = ?',
-        [req.user.userId, symbol.toUpperCase()],
-        (err) => {
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
+    await db.query(
+      'DELETE FROM watchlist WHERE user_id = $1 AND symbol = $2',
+      [req.user.userId, symbol.toUpperCase()]
+    );
 
     // Remove from tracking if no other users are watching
     removeSymbolFromTracking(symbol);

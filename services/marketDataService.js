@@ -51,23 +51,34 @@ async function updateMarketData(io) {
     const db = getDatabase();
     
     // Get all symbols that need updating (from portfolio holdings and watchlists)
-    const result = await db.query(
-      `SELECT DISTINCT symbol FROM (
-        SELECT symbol FROM portfolio_holdings
-        UNION
-        SELECT symbol FROM watchlist
-        UNION
-        SELECT symbol FROM market_data WHERE timestamp > NOW() - INTERVAL '1 hour'
-      )`
-    );
-    const symbols = result.rows.map(row => row.symbol);
+    try {
+      const result = await db.query(
+        `SELECT DISTINCT symbol FROM (
+          SELECT symbol FROM portfolio_holdings
+          UNION
+          SELECT symbol FROM watchlist
+          UNION
+          SELECT symbol FROM market_data WHERE timestamp > NOW() - INTERVAL '1 hour'
+        ) AS combined_symbols`
+      );
+      const symbols = result.rows.map(row => row.symbol);
 
-    if (symbols.length === 0) return;
-
-    // Update market data in batches
-    const updates = await yahooFinanceService.batchUpdateMarketData(symbols);
-    
-    // Broadcast updates via WebSocket
+      if (symbols.length === 0) return;
+      
+      // Update market data in batches
+      const updates = await yahooFinanceService.batchUpdateMarketData(symbols);
+      
+      // Broadcast updates via WebSocket
+      if (io) {
+        io.emit('marketDataUpdate', updates);
+      }
+      
+      return updates;
+    } catch (error) {
+      console.error('Error updating market data:', error);
+      // Continue execution even if there's an error
+      return [];
+    }
     if (io && updates.length > 0) {
       // Emit the entire array of updates at once (for bulk updates)
       io.emit('market_data_update', updates);

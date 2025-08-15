@@ -174,6 +174,15 @@ async function createTables() {
       three_year_return REAL,
       five_year_return REAL,
       last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`,
+    
+    // Watchlist
+    `CREATE TABLE IF NOT EXISTS watchlist (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
     )`
   ];
 
@@ -193,7 +202,9 @@ async function createTables() {
     'CREATE INDEX IF NOT EXISTS idx_price_alerts_symbol ON price_alerts(symbol)',
     'CREATE INDEX IF NOT EXISTS idx_analytics_user ON analytics_events(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_analytics_event_type ON analytics_events(event_type)',
-    'CREATE INDEX IF NOT EXISTS idx_optimization_user ON optimization_results(user_id)'
+    'CREATE INDEX IF NOT EXISTS idx_optimization_user ON optimization_results(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_watchlist_symbol ON watchlist(symbol)'
   ];
   
   // Execute all index creation queries
