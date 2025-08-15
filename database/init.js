@@ -43,11 +43,13 @@ async function createTables() {
       purchase_date DATE,
       average_cost REAL NOT NULL,
       purchase_price REAL,
+      current_price REAL,
       asset_type TEXT DEFAULT 'Stock',
       category TEXT,
       notes TEXT,
       target_allocation REAL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
     
@@ -234,6 +236,16 @@ async function runMigrations() {
     );
     await pool.query(
       `UPDATE portfolio_holdings SET purchase_price = average_cost WHERE purchase_price IS NULL`
+    );
+
+    // Add current_price column if not exists
+    await pool.query(
+      `ALTER TABLE portfolio_holdings ADD COLUMN IF NOT EXISTS current_price REAL`
+    );
+
+    // Add updated_at column if not exists
+    await pool.query(
+      `ALTER TABLE portfolio_holdings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
     );
     
     // Add asset_type column if not exists
