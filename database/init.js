@@ -53,7 +53,8 @@ async function createTables() {
     
     // Market data cache
     `CREATE TABLE IF NOT EXISTS market_data (
-      symbol TEXT PRIMARY KEY,
+      id TEXT PRIMARY KEY,
+      symbol TEXT UNIQUE NOT NULL,
       price REAL,
       change_percent REAL,
       volume REAL,
@@ -242,6 +243,46 @@ async function runMigrations() {
     await pool.query(
       `UPDATE portfolio_holdings SET asset_type = 'Stock' WHERE asset_type IS NULL`
     );
+    
+    // Update market_data table structure
+    try {
+      // Check if id column exists
+      const idColumnCheck = await pool.query(
+        `SELECT column_name FROM information_schema.columns 
+         WHERE table_name = 'market_data' AND column_name = 'id'`
+      );
+      
+      if (idColumnCheck.rows.length === 0) {
+        console.log('Updating market_data table structure...');
+        
+        // Add id column
+        await pool.query(`ALTER TABLE market_data ADD COLUMN id TEXT`);
+        
+        // Generate UUIDs for existing rows
+        await pool.query(`UPDATE market_data SET id = gen_random_uuid()::text WHERE id IS NULL`);
+        
+        // Check if primary key constraint exists
+        const pkCheck = await pool.query(
+          `SELECT constraint_name FROM information_schema.table_constraints
+           WHERE table_name = 'market_data' AND constraint_type = 'PRIMARY KEY'`
+        );
+        
+        if (pkCheck.rows.length > 0) {
+          // Drop existing primary key constraint
+          await pool.query(`ALTER TABLE market_data DROP CONSTRAINT ${pkCheck.rows[0].constraint_name}`);
+        }
+        
+        // Make id the primary key
+        await pool.query(`ALTER TABLE market_data ADD PRIMARY KEY (id)`);
+        
+        // Make symbol unique
+        await pool.query(`ALTER TABLE market_data ADD CONSTRAINT market_data_symbol_key UNIQUE (symbol)`);
+        
+        console.log('Successfully updated market_data table structure');
+      }
+    } catch (marketDataError) {
+      console.warn('Error updating market_data table:', marketDataError.message);
+    }
     
     // Add UNIQUE constraint to portfolio_performance if it doesn't exist
     try {
