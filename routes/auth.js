@@ -36,12 +36,32 @@ router.post('/register', [
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user
+    // Create user - handle both password_hash and legacy password column
     const userId = uuidv4();
-    await db.query(
-      'INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4)',
-      [userId, email, passwordHash, name]
-    );
+    try {
+      // Check if password_hash column exists
+      const passwordHashCheck = await db.query(
+        `SELECT column_name FROM information_schema.columns 
+         WHERE table_name = 'users' AND column_name = 'password_hash'`
+      );
+      
+      if (passwordHashCheck.rows.length > 0) {
+        // Use password_hash column
+        await db.query(
+          'INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4)',
+          [userId, email, passwordHash, name]
+        );
+      } else {
+        // Use legacy password column
+        await db.query(
+          'INSERT INTO users (id, email, password, name) VALUES ($1, $2, $3, $4)',
+          [userId, email, passwordHash, name]
+        );
+      }
+    } catch (error) {
+      console.error('Error creating user:', error);
+      throw error;
+    }
 
     // Generate JWT
     const token = jwt.sign(
@@ -79,7 +99,7 @@ router.post('/login', [
 
     // Find user
     const userResult = await db.query(
-      'SELECT id, email, password_hash, name, role FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, password, name, role FROM users WHERE email = $1',
       [email]
     );
     const user = userResult.rows[0];
@@ -89,8 +109,24 @@ router.post('/login', [
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    // Verify password - handle both password_hash and legacy password column
+    let isValidPassword = false;
+    if (user.password_hash) {
+      isValidPassword = await bcrypt.compare(password, user.password_hash);
+    } else if (user.password) {
+      isValidPassword = await bcrypt.compare(password, user.password);
+      
+      // Migrate to password_hash if login is successful
+      if (isValidPassword) {
+        try {
+          await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [user.password, user.id]);
+          console.log(`Migrated password to password_hash for user ${user.id}`);
+        } catch (migrationError) {
+          console.error('Error migrating password to password_hash:', migrationError);
+        }
+      }
+    }
+    
     if (!isValidPassword) {
       await logAnalyticsEvent(user.id, 'login_failed', { email, reason: 'invalid_password' }, req.ip, req.get('User-Agent'));
       return res.status(401).json({ error: 'Invalid credentials' });
