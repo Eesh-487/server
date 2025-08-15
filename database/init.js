@@ -244,43 +244,6 @@ async function runMigrations() {
       `UPDATE portfolio_holdings SET asset_type = 'Stock' WHERE asset_type IS NULL`
     );
     
-    // Check and migrate password field to password_hash if needed
-    try {
-      console.log('Checking users table schema...');
-      
-      // Check if password_hash column exists
-      const passwordHashCheck = await pool.query(
-        `SELECT column_name FROM information_schema.columns 
-         WHERE table_name = 'users' AND column_name = 'password_hash'`
-      );
-      
-      // Check if old password column exists
-      const passwordCheck = await pool.query(
-        `SELECT column_name FROM information_schema.columns 
-         WHERE table_name = 'users' AND column_name = 'password'`
-      );
-      
-      if (passwordHashCheck.rows.length === 0) {
-        console.log('Adding password_hash column to users table...');
-        
-        // Add password_hash column
-        await pool.query(`ALTER TABLE users ADD COLUMN password_hash TEXT`);
-        
-        // If old password column exists, migrate the data
-        if (passwordCheck.rows.length > 0) {
-          console.log('Migrating from password to password_hash...');
-          await pool.query(`UPDATE users SET password_hash = password WHERE password_hash IS NULL`);
-          
-          // Optionally drop the old column after migration
-          // await pool.query(`ALTER TABLE users DROP COLUMN password`);
-        }
-        
-        console.log('Successfully updated users table schema');
-      }
-    } catch (usersTableError) {
-      console.warn('Error updating users table:', usersTableError.message);
-    };
-    
     // Update market_data table structure
     try {
       // Check if id column exists
@@ -366,25 +329,10 @@ async function createTestUser() {
       const userId = uuidv4();
       const hashedPassword = await bcrypt.hash('password123', 10);
       
-      // Check if password_hash column exists
-      const passwordHashCheck = await pool.query(
-        `SELECT column_name FROM information_schema.columns 
-         WHERE table_name = 'users' AND column_name = 'password_hash'`
+      await pool.query(
+        'INSERT INTO users (id, email, password_hash, name, role) VALUES ($1, $2, $3, $4, $5)',
+        [userId, 'test@example.com', hashedPassword, 'Test User', 'user']
       );
-      
-      if (passwordHashCheck.rows.length > 0) {
-        // Use password_hash column
-        await pool.query(
-          'INSERT INTO users (id, email, password_hash, name, role) VALUES ($1, $2, $3, $4, $5)',
-          [userId, 'test@example.com', hashedPassword, 'Test User', 'user']
-        );
-      } else {
-        // Use legacy password column
-        await pool.query(
-          'INSERT INTO users (id, email, password, name, role) VALUES ($1, $2, $3, $4, $5)',
-          [userId, 'test@example.com', hashedPassword, 'Test User', 'user']
-        );
-      }
       
       // Create user settings
       await pool.query(
