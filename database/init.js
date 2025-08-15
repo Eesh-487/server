@@ -38,7 +38,7 @@ async function createTables() {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       symbol TEXT,
-      company_name TEXT,
+      name TEXT,
       quantity REAL NOT NULL,
       purchase_date DATE,
       average_cost REAL NOT NULL,
@@ -361,6 +361,26 @@ async function runMigrations() {
       }
     } catch (analyticsColErr) {
       console.warn('Analytics events column migration warning:', analyticsColErr.message);
+    }
+
+    // Rename portfolio_holdings.company_name -> name if needed
+    try {
+      const phColsRes = await pool.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'portfolio_holdings'
+      `);
+      const phCols = phColsRes.rows.map(r => r.column_name);
+      if (phCols.includes('company_name') && !phCols.includes('name')) {
+        console.log('Renaming portfolio_holdings.company_name to name');
+        await pool.query(`ALTER TABLE portfolio_holdings RENAME COLUMN company_name TO name`);
+      } else if (phCols.includes('company_name') && phCols.includes('name')) {
+        console.log('Both name and company_name columns exist; consolidating values');
+        await pool.query(`UPDATE portfolio_holdings SET name = company_name WHERE name IS NULL AND company_name IS NOT NULL`);
+        console.log('Dropping legacy company_name column');
+        await pool.query(`ALTER TABLE portfolio_holdings DROP COLUMN company_name`);
+      }
+    } catch (phErr) {
+      console.warn('Portfolio holdings name column migration warning:', phErr.message);
     }
     
     console.log('Database migrations completed successfully');
